@@ -39,6 +39,7 @@ import { PRODUCTS_CACHE_KEY, LAST_SYNC_KEY } from './config/offlineConfig';
 import { 
   STOCK_STORAGE_KEY, 
   DEFAULT_INITIAL_STOCKS, 
+  DEFAULT_DEAL_STARTING_STOCKS,
   DEAL_DISCOUNTS,
   MIN_DISCOUNT_PRICE_THRESHOLD,
   getStoredFlashDealsState, 
@@ -49,11 +50,11 @@ import { markCouponAsUsed } from './config/coupons';
 export const STORE_STOCK_STORAGE_KEY = 'sofyan_store_stocks_v5';
 
 // قائمة بالمنتجات المنتهية الكمية افتراضياً على جميع البيئات (Vercel و Localhost)
-export const DEFAULT_OUT_OF_STOCK_IDS = ['117', '132', '153', '193'];
+export const DEFAULT_OUT_OF_STOCK_IDS = ['11', '43', '56', '117', '132', '153', '193'];
 
 // Clean up old test data to ensure all products return to normal stocks and counter restarts clean
 try {
-  ['sofyan_cached_products_v6', 'sofyan_store_stocks_v4', 'sofyan_store_stocks_v3', 'sofyan_flash_deals_stock_v5', 'sofyan_flash_deals_expiry_v5', 'sofyan_flash_deals_cycle_v5', 'sofyan_cached_products_v5', 'sofyan_flash_deals_stock_v4', 'sofyan_flash_deals_expiry_v4', 'sofyan_flash_deals_cycle_v4', 'sofyan_cached_products_v4', 'sofyan_cached_products_v3', 'sofyan_cached_products_v2'].forEach(k => {
+  ['sofyan_flash_deals_stock_v6', 'sofyan_flash_deals_expiry_v6', 'sofyan_flash_deals_cycle_v6', 'sofyan_cached_products_v6', 'sofyan_store_stocks_v4', 'sofyan_store_stocks_v3', 'sofyan_flash_deals_stock_v5', 'sofyan_flash_deals_expiry_v5', 'sofyan_flash_deals_cycle_v5', 'sofyan_cached_products_v5', 'sofyan_flash_deals_stock_v4', 'sofyan_flash_deals_expiry_v4', 'sofyan_flash_deals_cycle_v4', 'sofyan_cached_products_v4', 'sofyan_cached_products_v3', 'sofyan_cached_products_v2'].forEach(k => {
     localStorage.removeItem(k);
   });
 } catch {
@@ -154,8 +155,10 @@ const formatRawProducts = (rawList, savedStoreStocks = {}, savedDealStocks = {})
         currentStock = savedDealStocks[idStr];
       } else if (savedStoreStocks[idStr] !== undefined) {
         currentStock = savedStoreStocks[idStr];
+      } else if (DEFAULT_OUT_OF_STOCK_IDS.includes(idStr)) {
+        currentStock = 0;
       } else {
-        currentStock = DEFAULT_INITIAL_STOCKS[dealIdx % DEFAULT_INITIAL_STOCKS.length];
+        currentStock = DEFAULT_DEAL_STARTING_STOCKS[dealIdx % DEFAULT_DEAL_STARTING_STOCKS.length];
       }
     } else {
       if (savedStoreStocks[idStr] !== undefined) {
@@ -231,7 +234,7 @@ const getInitialProducts = () => {
               ? 0 
               : (savedDealStocks[idStr] !== undefined 
                 ? savedDealStocks[idStr] 
-                : (typeof p.stock === 'number' ? p.stock : DEFAULT_INITIAL_STOCKS[dealIdx % DEFAULT_INITIAL_STOCKS.length]));
+                : (typeof p.stock === 'number' ? p.stock : DEFAULT_DEAL_STARTING_STOCKS[dealIdx % DEFAULT_DEAL_STARTING_STOCKS.length]));
             return { 
               ...p, 
               stock: currentStock, 

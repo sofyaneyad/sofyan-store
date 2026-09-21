@@ -1,12 +1,13 @@
 // Flash Deals Persistent 3-Day Cycle Configuration
-export const CYCLE_STORAGE_KEY = 'sofyan_flash_deals_cycle_v6';
-export const EXPIRY_STORAGE_KEY = 'sofyan_flash_deals_expiry_v6';
-export const STOCK_STORAGE_KEY = 'sofyan_flash_deals_stock_v6';
+export const CYCLE_STORAGE_KEY = 'sofyan_flash_deals_cycle_v7';
+export const EXPIRY_STORAGE_KEY = 'sofyan_flash_deals_expiry_v7';
+export const STOCK_STORAGE_KEY = 'sofyan_flash_deals_stock_v7';
 
 export const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000; // Exactly 72 hours (3 days)
 // Minimum price required for a product to be eligible for discounts or flash deals
 export const MIN_DISCOUNT_PRICE_THRESHOLD = 40;
 export const DEFAULT_INITIAL_STOCKS = [5, 4, 6, 5];
+export const DEFAULT_DEAL_STARTING_STOCKS = [4, 0, 0, 0];
 // Realistic, commercially balanced deal discounts (8% - 12%) so they stack reasonably with store coupons
 export const DEAL_DISCOUNTS = [10, 8, 12, 9];
 
