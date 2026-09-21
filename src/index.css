@@ -8,6 +8,10 @@
   --font-cairo: 'Cairo', sans-serif;
 }
 
+html {
+  scrollbar-gutter: stable;
+}
+
 body {
   font-family: 'Cairo', sans-serif;
-}
+}

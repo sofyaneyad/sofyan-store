@@ -1,4 +1,5 @@
 import { X } from 'lucide-react';
+import useBodyScrollLock from '../hooks/useBodyScrollLock';
 
 export default function AuthModal({ 
   isOpen, 
@@ -16,12 +17,14 @@ export default function AuthModal({
   language = 'ar',
   t
 }) {
-  if (!isOpen) return null;
   const isRtl = language === 'ar';
+  useBodyScrollLock(isOpen);
+
+  if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[110] flex items-center justify-center p-4" dir={isRtl ? 'rtl' : 'ltr'}>
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsOpen(false)}></div>
+    <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 overscroll-contain" dir={isRtl ? 'rtl' : 'ltr'}>
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsOpen(false)} onWheel={(e) => e.stopPropagation()}></div>
       <div className="relative border w-full max-w-md rounded-3xl p-8 shadow-2xl z-10 bg-zinc-900 border-zinc-800 text-white">
         <div className="flex justify-between items-center mb-6">
           <h3 className="font-black text-base">

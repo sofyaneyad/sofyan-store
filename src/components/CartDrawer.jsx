@@ -8,6 +8,7 @@ import { getStoredFlashDealsState, getFlashDealProductIds } from '../config/flas
 import { getSavedGazaArea, saveGazaArea } from '../config/gazaDeliveryAreas';
 import GazaDeliveryModal from './GazaDeliveryModal';
 import StripePaymentModal from './StripePaymentModal';
+import useBodyScrollLock from '../hooks/useBodyScrollLock';
 
 function CartItemQuantityControl({ item, updateCartQuantity, setCartItemQuantity, darkMode, isRtl, t }) {
   const [localVal, setLocalVal] = useState(String(item.quantity));
@@ -116,6 +117,9 @@ export default function CartDrawer({
   const [selectedGazaArea, setSelectedGazaArea] = useState(null);
   const [isGazaModalOpen, setIsGazaModalOpen] = useState(false);
   const [isStripeModalOpen, setIsStripeModalOpen] = useState(false);
+
+  // Lock body and html scroll when cart is open
+  useBodyScrollLock(isOpen);
 
   // Clear any legacy saved delivery area on mount so it never pre-selects automatically
   useEffect(() => {
@@ -351,16 +355,14 @@ export default function CartDrawer({
     setAppliedCoupon(null);
   };
 
-  // Close on Escape & Lock body scroll
+  // Close on Escape key
   useEffect(() => {
     if (!isOpen) return;
     const handleKeyDown = (e) => {
       if (e.key === 'Escape') setIsOpen(false);
     };
-    document.body.style.overflow = 'hidden';
     window.addEventListener('keydown', handleKeyDown);
     return () => {
-      document.body.style.overflow = '';
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, [isOpen, setIsOpen]);
@@ -368,11 +370,15 @@ export default function CartDrawer({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-5 overflow-y-auto" dir={isRtl ? 'rtl' : 'ltr'}>
+    <div 
+      className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-5 overflow-y-auto overscroll-contain" 
+      dir={isRtl ? 'rtl' : 'ltr'}
+    >
       {/* Backdrop with soft blur */}
       <div 
         className="fixed inset-0 bg-black/60 backdrop-blur-xs transition-opacity" 
         onClick={() => setIsOpen(false)} 
+        onWheel={(e) => e.stopPropagation()}
       />
 
       {/* Centered Cart Container */}
@@ -418,7 +424,7 @@ export default function CartDrawer({
         </div>
 
         {/* Cart Items List */}
-        <div className="flex-1 overflow-y-auto px-6 py-2 divide-y divide-slate-100 dark:divide-zinc-800/60">
+        <div className="flex-1 overflow-y-auto overscroll-contain px-6 py-2 divide-y divide-slate-100 dark:divide-zinc-800/60">
           {cart.length === 0 ? (
             <div className="text-center py-20 text-zinc-400 space-y-2">
               <ShoppingBag className="w-10 h-10 mx-auto stroke-1 text-zinc-300 dark:text-zinc-600" />

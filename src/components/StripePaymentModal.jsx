@@ -18,6 +18,7 @@ import {
   generateTransactionId 
 } from '../config/stripeConfig';
 import toast from 'react-hot-toast';
+import useBodyScrollLock from '../hooks/useBodyScrollLock';
 
 export default function StripePaymentModal({
   isOpen,
@@ -38,6 +39,9 @@ export default function StripePaymentModal({
   const [cardNumber, setCardNumber] = useState('');
   const [expiry, setExpiry] = useState('');
   const [cvc, setCvc] = useState('');
+
+  // Lock body/html scroll when modal is open
+  useBodyScrollLock(isOpen);
   const [cardHolder, setCardHolder] = useState(user?.displayName || user?.name || '');
   
   // Processing & Success states
@@ -169,13 +173,14 @@ export default function StripePaymentModal({
 
   return (
     <div 
-      className="fixed inset-0 z-[120] flex items-center justify-center p-3 sm:p-5 overflow-y-auto"
+      className="fixed inset-0 z-[120] flex items-center justify-center p-3 sm:p-5 overflow-y-auto overscroll-contain"
       dir={isRtl ? 'rtl' : 'ltr'}
     >
       {/* Backdrop */}
       <div 
         className="fixed inset-0 bg-black/75 backdrop-blur-xs transition-opacity" 
         onClick={() => { if (!isProcessing) onClose(); }} 
+        onWheel={(e) => e.stopPropagation()}
       />
 
       {/* Modal Container */}

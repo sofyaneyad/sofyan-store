@@ -3,6 +3,7 @@ import { MapPin, X, Search, Check, Truck, Clock, ShieldCheck, AlertCircle } from
 import { GAZA_GOVERNORATES, GAZA_DELIVERY_AREAS } from '../config/gazaDeliveryAreas';
 import { formatPrice } from '../config/currencies';
 import toast from 'react-hot-toast';
+import useBodyScrollLock from '../hooks/useBodyScrollLock';
 
 export default function GazaDeliveryModal({
   isOpen,
@@ -17,16 +18,17 @@ export default function GazaDeliveryModal({
   const [searchQuery, setSearchQuery] = useState('');
   const [activeGovernorate, setActiveGovernorate] = useState('all');
 
+  // Lock body/html scroll
+  useBodyScrollLock(isOpen);
+
   // Close on Escape key
   useEffect(() => {
     if (!isOpen) return;
     const handleKeyDown = (e) => {
       if (e.key === 'Escape') onClose();
     };
-    document.body.style.overflow = 'hidden';
     window.addEventListener('keydown', handleKeyDown);
     return () => {
-      document.body.style.overflow = '';
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, [isOpen, onClose]);
@@ -93,13 +95,14 @@ export default function GazaDeliveryModal({
 
   return (
     <div 
-      className="fixed inset-0 z-[110] flex items-center justify-center p-3 sm:p-5 overflow-y-auto"
+      className="fixed inset-0 z-[110] flex items-center justify-center p-3 sm:p-5 overflow-y-auto overscroll-contain"
       dir={isRtl ? 'rtl' : 'ltr'}
     >
       {/* Backdrop */}
       <div 
         className="fixed inset-0 bg-black/60 backdrop-blur-xs transition-opacity" 
         onClick={onClose}
+        onWheel={(e) => e.stopPropagation()}
       />
 
       {/* Modal Container */}

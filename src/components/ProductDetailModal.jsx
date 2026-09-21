@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { formatPrice } from '../config/currencies';
 import { FALLBACK_PRODUCT_IMAGE } from '../config/offlineConfig';
+import useBodyScrollLock from '../hooks/useBodyScrollLock';
 
 const getReviewCount = (prod) => {
   if (!prod) return 24;
@@ -62,7 +63,10 @@ export default function ProductDetailModal({
   const MAX_ALLOWED = 100;
   const currentQuantity = Math.max(1, Math.min(MAX_ALLOWED, parseInt(quantityInput, 10) || 1));
 
-  // Lock body scroll & listen to Escape key
+  // Lock body/html scroll when product modal is open
+  useBodyScrollLock(Boolean(product));
+
+  // Listen to Escape key
   useEffect(() => {
     if (!product) return;
 
@@ -70,11 +74,9 @@ export default function ProductDetailModal({
       if (e.key === 'Escape') onClose();
     };
 
-    document.body.style.overflow = 'hidden';
     window.addEventListener('keydown', handleKeyDown);
 
     return () => {
-      document.body.style.overflow = '';
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, [product, onClose]);
@@ -125,11 +127,12 @@ export default function ProductDetailModal({
   const displayDescription = product.arabicDescription || product.description;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2.5 sm:p-4 md:p-6 overflow-y-auto" dir="rtl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2.5 sm:p-4 md:p-6 overflow-y-auto overscroll-contain" dir="rtl">
       {/* Backdrop */}
       <div 
         className="fixed inset-0 bg-black/70 backdrop-blur-sm transition-opacity" 
         onClick={onClose} 
+        onWheel={(e) => e.stopPropagation()}
       />
 
       {/* Modal Card */}
