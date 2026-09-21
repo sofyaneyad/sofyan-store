@@ -47,14 +47,14 @@ import {
 } from './config/flashDealsConfig';
 import { markCouponAsUsed } from './config/coupons';
 
-export const STORE_STOCK_STORAGE_KEY = 'sofyan_store_stocks_v5';
+export const STORE_STOCK_STORAGE_KEY = 'sofyan_store_stocks_v8';
 
 // قائمة بالمنتجات المنتهية الكمية افتراضياً على جميع البيئات (Vercel و Localhost)
 export const DEFAULT_OUT_OF_STOCK_IDS = ['11', '43', '56', '117', '132', '153', '193'];
 
 // Clean up old test data to ensure all products return to normal stocks and counter restarts clean
 try {
-  ['sofyan_flash_deals_stock_v6', 'sofyan_flash_deals_expiry_v6', 'sofyan_flash_deals_cycle_v6', 'sofyan_cached_products_v6', 'sofyan_store_stocks_v4', 'sofyan_store_stocks_v3', 'sofyan_flash_deals_stock_v5', 'sofyan_flash_deals_expiry_v5', 'sofyan_flash_deals_cycle_v5', 'sofyan_cached_products_v5', 'sofyan_flash_deals_stock_v4', 'sofyan_flash_deals_expiry_v4', 'sofyan_flash_deals_cycle_v4', 'sofyan_cached_products_v4', 'sofyan_cached_products_v3', 'sofyan_cached_products_v2'].forEach(k => {
+  ['sofyan_store_stocks_v5', 'sofyan_flash_deals_stock_v7', 'sofyan_flash_deals_expiry_v7', 'sofyan_flash_deals_cycle_v7', 'sofyan_cached_products_v7', 'sofyan_flash_deals_stock_v6', 'sofyan_flash_deals_expiry_v6', 'sofyan_flash_deals_cycle_v6', 'sofyan_cached_products_v6', 'sofyan_store_stocks_v4', 'sofyan_store_stocks_v3', 'sofyan_flash_deals_stock_v5', 'sofyan_flash_deals_expiry_v5', 'sofyan_flash_deals_cycle_v5', 'sofyan_cached_products_v5', 'sofyan_flash_deals_stock_v4', 'sofyan_flash_deals_expiry_v4', 'sofyan_flash_deals_cycle_v4', 'sofyan_cached_products_v4', 'sofyan_cached_products_v3', 'sofyan_cached_products_v2'].forEach(k => {
     localStorage.removeItem(k);
   });
 } catch {
@@ -150,21 +150,19 @@ const formatRawProducts = (rawList, savedStoreStocks = {}, savedDealStocks = {})
     const isDealProduct = dealIdx !== -1;
 
     let currentStock;
-    if (isDealProduct) {
+    if (DEFAULT_OUT_OF_STOCK_IDS.includes(idStr)) {
+      currentStock = 0;
+    } else if (isDealProduct) {
       if (savedDealStocks[idStr] !== undefined) {
         currentStock = savedDealStocks[idStr];
       } else if (savedStoreStocks[idStr] !== undefined) {
         currentStock = savedStoreStocks[idStr];
-      } else if (DEFAULT_OUT_OF_STOCK_IDS.includes(idStr)) {
-        currentStock = 0;
       } else {
         currentStock = DEFAULT_DEAL_STARTING_STOCKS[dealIdx % DEFAULT_DEAL_STARTING_STOCKS.length];
       }
     } else {
       if (savedStoreStocks[idStr] !== undefined) {
         currentStock = savedStoreStocks[idStr];
-      } else if (DEFAULT_OUT_OF_STOCK_IDS.includes(idStr)) {
-        currentStock = 0;
       } else {
         currentStock = originalStock;
       }
