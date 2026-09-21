@@ -8,6 +8,7 @@ import {
   STOCK_STORAGE_KEY, 
   THREE_DAYS_MS, 
   DEFAULT_INITIAL_STOCKS, 
+  DEFAULT_DEAL_STARTING_STOCKS,
   DEAL_DISCOUNTS,
   MIN_DISCOUNT_PRICE_THRESHOLD,
   getStoredFlashDealsState, 
@@ -84,9 +85,10 @@ export default function FlashDealsSection({
       const discountPercent = DEAL_DISCOUNTS[index % DEAL_DISCOUNTS.length];
       const originalPrice = prod.price ? Number((prod.price * (1 + discountPercent / 100)).toFixed(2)) : 0;
       const initialStock = DEFAULT_INITIAL_STOCKS[index % DEFAULT_INITIAL_STOCKS.length];
+      const defaultStarting = DEFAULT_DEAL_STARTING_STOCKS[index % DEFAULT_DEAL_STARTING_STOCKS.length];
       
       // Stock is unified directly with the store product stock!
-      const currentStock = prod.stock !== undefined ? prod.stock : initialStock;
+      const currentStock = prod.stock !== undefined ? prod.stock : defaultStarting;
 
       return {
         ...prod,
