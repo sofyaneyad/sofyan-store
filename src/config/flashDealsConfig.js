@@ -22,9 +22,9 @@ export const calculateTimeLeft = (targetTimestamp) => {
   };
 };
 
-// Fixed universal anchor epoch (Sunday, Sep 20, 2026 00:00:00 UTC)
-// This synchronizes the 3-day deals cycle deterministically across ALL environments (Localhost, Vercel, mobile, etc.)
-export const FLASH_DEALS_GLOBAL_ANCHOR = new Date('2026-09-20T00:00:00Z').getTime();
+// Fixed universal anchor epoch: calibrated so the current deal cycle expires in ~15.5 hours
+// Synchronized deterministically across ALL environments (Localhost, Vercel, mobile, etc.)
+export const FLASH_DEALS_GLOBAL_ANCHOR = new Date('2026-09-19T11:30:00Z').getTime();
 
 /**
  * Deterministically computes the current 3-day cycle and expiry from a fixed global anchor.
