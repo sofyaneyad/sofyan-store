@@ -48,6 +48,9 @@ import { markCouponAsUsed } from './config/coupons';
 
 export const STORE_STOCK_STORAGE_KEY = 'sofyan_store_stocks_v5';
 
+// قائمة بالمنتجات المنتهية الكمية افتراضياً على جميع البيئات (Vercel و Localhost)
+export const DEFAULT_OUT_OF_STOCK_IDS = ['117', '132', '153', '193'];
+
 // Clean up old test data to ensure all products return to normal stocks and counter restarts clean
 try {
   ['sofyan_store_stocks_v4', 'sofyan_store_stocks_v3', 'sofyan_flash_deals_stock_v5', 'sofyan_flash_deals_expiry_v5', 'sofyan_flash_deals_cycle_v5', 'sofyan_cached_products_v5', 'sofyan_flash_deals_stock_v4', 'sofyan_flash_deals_expiry_v4', 'sofyan_flash_deals_cycle_v4', 'sofyan_cached_products_v4', 'sofyan_cached_products_v3', 'sofyan_cached_products_v2'].forEach(k => {
@@ -139,7 +142,7 @@ const formatRawProducts = (rawList, savedStoreStocks = {}, savedDealStocks = {})
 
   return rawList.map((item) => {
     const idStr = item.id.toString();
-    const originalStock = item.stock || 25;
+    const originalStock = typeof item.stock === 'number' ? item.stock : 25;
     
     // Check if this product is one of the 4 active flash deal products
     const dealIdx = dealProductIds.indexOf(idStr);
@@ -157,6 +160,8 @@ const formatRawProducts = (rawList, savedStoreStocks = {}, savedDealStocks = {})
     } else {
       if (savedStoreStocks[idStr] !== undefined) {
         currentStock = savedStoreStocks[idStr];
+      } else if (DEFAULT_OUT_OF_STOCK_IDS.includes(idStr)) {
+        currentStock = 0;
       } else {
         currentStock = originalStock;
       }
@@ -1031,7 +1036,7 @@ export default function App() {
                 } else {
                   return { 
                     ...p, 
-                    stock: p.originalStock || 25, 
+                    stock: typeof p.originalStock === 'number' ? p.originalStock : 25, 
                     isDealProduct: false,
                     discountPercentage: normalizeProductDiscount(p.discountPercentage, p.price)
                   };
