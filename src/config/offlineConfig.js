@@ -1,5 +1,5 @@
 // Offline Configuration & Image Fallbacks
-export const PRODUCTS_CACHE_KEY = 'sofyan_cached_products_v6';
+export const PRODUCTS_CACHE_KEY = 'sofyan_cached_products_v7';
 export const LAST_SYNC_KEY = 'sofyan_products_last_sync';
 
 // Clean SVG placeholder icon for products when offline or when image fails to load

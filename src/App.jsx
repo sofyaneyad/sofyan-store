@@ -53,7 +53,7 @@ export const DEFAULT_OUT_OF_STOCK_IDS = ['117', '132', '153', '193'];
 
 // Clean up old test data to ensure all products return to normal stocks and counter restarts clean
 try {
-  ['sofyan_store_stocks_v4', 'sofyan_store_stocks_v3', 'sofyan_flash_deals_stock_v5', 'sofyan_flash_deals_expiry_v5', 'sofyan_flash_deals_cycle_v5', 'sofyan_cached_products_v5', 'sofyan_flash_deals_stock_v4', 'sofyan_flash_deals_expiry_v4', 'sofyan_flash_deals_cycle_v4', 'sofyan_cached_products_v4', 'sofyan_cached_products_v3', 'sofyan_cached_products_v2'].forEach(k => {
+  ['sofyan_cached_products_v6', 'sofyan_store_stocks_v4', 'sofyan_store_stocks_v3', 'sofyan_flash_deals_stock_v5', 'sofyan_flash_deals_expiry_v5', 'sofyan_flash_deals_cycle_v5', 'sofyan_cached_products_v5', 'sofyan_flash_deals_stock_v4', 'sofyan_flash_deals_expiry_v4', 'sofyan_flash_deals_cycle_v4', 'sofyan_cached_products_v4', 'sofyan_cached_products_v3', 'sofyan_cached_products_v2'].forEach(k => {
     localStorage.removeItem(k);
   });
 } catch {
@@ -223,11 +223,15 @@ const getInitialProducts = () => {
         const dealsState = getStoredFlashDealsState();
         const dealProductIds = getFlashDealProductIds(parsed, dealsState.cycle);
         return parsed.map((p) => {
-          const dealIdx = dealProductIds.indexOf(p.id);
+          const idStr = String(p.id);
+          const isExplicitSoldOut = DEFAULT_OUT_OF_STOCK_IDS.includes(idStr);
+          const dealIdx = dealProductIds.indexOf(idStr);
           if (dealIdx !== -1) {
-            const currentStock = savedDealStocks[p.id] !== undefined 
-              ? savedDealStocks[p.id] 
-              : (p.stock !== undefined ? p.stock : DEFAULT_INITIAL_STOCKS[dealIdx % DEFAULT_INITIAL_STOCKS.length]);
+            const currentStock = isExplicitSoldOut 
+              ? 0 
+              : (savedDealStocks[idStr] !== undefined 
+                ? savedDealStocks[idStr] 
+                : (typeof p.stock === 'number' ? p.stock : DEFAULT_INITIAL_STOCKS[dealIdx % DEFAULT_INITIAL_STOCKS.length]));
             return { 
               ...p, 
               stock: currentStock, 
@@ -235,8 +239,14 @@ const getInitialProducts = () => {
               discountPercentage: DEAL_DISCOUNTS[dealIdx % DEAL_DISCOUNTS.length]
             };
           }
+          const currentStock = isExplicitSoldOut 
+            ? 0 
+            : (savedStoreStocks[idStr] !== undefined 
+                ? savedStoreStocks[idStr] 
+                : (typeof p.stock === 'number' ? p.stock : (typeof p.originalStock === 'number' ? p.originalStock : 25)));
           return { 
             ...p, 
+            stock: currentStock,
             isDealProduct: false,
             discountPercentage: normalizeProductDiscount(p.discountPercentage, p.price)
           };
