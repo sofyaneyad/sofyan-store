@@ -22,70 +22,47 @@ export const calculateTimeLeft = (targetTimestamp) => {
   };
 };
 
+// Fixed universal anchor epoch (Sunday, Sep 20, 2026 00:00:00 UTC)
+// This synchronizes the 3-day deals cycle deterministically across ALL environments (Localhost, Vercel, mobile, etc.)
+export const FLASH_DEALS_GLOBAL_ANCHOR = new Date('2026-09-20T00:00:00Z').getTime();
+
 /**
- * Reads persistent 3-day cycle and expiry from localStorage.
- * Ensures the 3-day countdown NEVER restarts on page load or refresh.
- * Only increments cycle and resets stocks when the 3 full days have literally passed in real time.
+ * Deterministically computes the current 3-day cycle and expiry from a fixed global anchor.
+ * Guaranteed to be 100% identical on Localhost, Vercel, and for every user worldwide.
+ * Never restarts from 3 days on new devices, deployments, or browser reloads.
  */
 export const getStoredFlashDealsState = () => {
   const now = Date.now();
-  let cycle = 0;
-  let expiry = 0;
+
+  // Deterministically calculate global cycle and expiry
+  const elapsed = Math.max(0, now - FLASH_DEALS_GLOBAL_ANCHOR);
+  const cycle = Math.floor(elapsed / THREE_DAYS_MS);
+  const expiry = FLASH_DEALS_GLOBAL_ANCHOR + ((cycle + 1) * THREE_DAYS_MS);
+
   let stocks = {};
 
   try {
-    const savedCycle = localStorage.getItem(CYCLE_STORAGE_KEY);
-    if (savedCycle !== null) {
-      const parsedCycle = parseInt(savedCycle, 10);
-      if (!isNaN(parsedCycle)) cycle = parsedCycle;
-    }
-
-    const savedExpiry = localStorage.getItem(EXPIRY_STORAGE_KEY);
-    if (savedExpiry !== null) {
-      const parsedExpiry = parseInt(savedExpiry, 10);
-      if (!isNaN(parsedExpiry)) expiry = parsedExpiry;
-    }
-
     const savedStocks = localStorage.getItem(STOCK_STORAGE_KEY);
-    if (savedStocks) {
+    const savedCycle = localStorage.getItem(CYCLE_STORAGE_KEY);
+
+    // Reset deal stocks if the 3-day cycle advanced in real time
+    if (savedCycle !== null && parseInt(savedCycle, 10) !== cycle) {
+      localStorage.removeItem(STOCK_STORAGE_KEY);
+      stocks = {};
+    } else if (savedStocks) {
       stocks = JSON.parse(savedStocks) || {};
     }
-  } catch (err) {
-    console.error("Error reading flash deals state from localStorage:", err);
-  }
 
-  // 1. First-time initialization: Set expiry to exactly now + 3 days and persist it
-  if (!expiry) {
-    expiry = now + THREE_DAYS_MS;
-    try {
-      localStorage.setItem(CYCLE_STORAGE_KEY, String(cycle));
-      localStorage.setItem(EXPIRY_STORAGE_KEY, String(expiry));
-      localStorage.setItem(STOCK_STORAGE_KEY, JSON.stringify(stocks));
-    } catch {
-      // ignore
-    }
-  } else if (now >= expiry) {
-    // 2. The 3 full days have ACTUALLY elapsed in real time:
-    const cyclesPassed = Math.max(1, Math.floor((now - expiry) / THREE_DAYS_MS) + 1);
-    cycle += cyclesPassed;
-    // Anchor new expiry cleanly to the previous schedule
-    expiry = expiry + (cyclesPassed * THREE_DAYS_MS);
-    if (expiry <= now) {
-      expiry = now + THREE_DAYS_MS;
-    }
-    stocks = {}; // Reset deal stocks for the fresh 3-day cycle
-    try {
-      localStorage.setItem(CYCLE_STORAGE_KEY, String(cycle));
-      localStorage.setItem(EXPIRY_STORAGE_KEY, String(expiry));
-      localStorage.setItem(STOCK_STORAGE_KEY, JSON.stringify(stocks));
-    } catch {
-      // ignore
-    }
+    localStorage.setItem(CYCLE_STORAGE_KEY, String(cycle));
+    localStorage.setItem(EXPIRY_STORAGE_KEY, String(expiry));
+    localStorage.setItem(STOCK_STORAGE_KEY, JSON.stringify(stocks));
+  } catch (err) {
+    // ignore storage restrictions
   }
-  // 3. Otherwise (now < expiry): DO NOT TOUCH EXPIRY! The countdown continues exactly as scheduled.
 
   return { cycle, expiry, stocks };
 };
+
 
 /**
  * Interleaves high-priced products (price >= $40) across diverse categories

@@ -54,30 +54,15 @@ export default function FlashDealsSection({
       const currentExpiry = expiryRef.current;
 
       if (now >= currentExpiry) {
-        // ONLY when the 3 full days have literally passed in real time:
-        const nextCycle = dealsState.cycle + 1;
-        const newExpiry = now + THREE_DAYS_MS;
+        // Deterministically roll over to the next global cycle
+        const freshState = getStoredFlashDealsState();
+        expiryRef.current = freshState.expiry;
 
-        try {
-          localStorage.setItem(CYCLE_STORAGE_KEY, String(nextCycle));
-          localStorage.setItem(EXPIRY_STORAGE_KEY, String(newExpiry));
-          localStorage.removeItem(STOCK_STORAGE_KEY);
-        } catch {
-          // ignore
-        }
-
-        expiryRef.current = newExpiry;
-
-        setDealsState({
-          cycle: nextCycle,
-          expiry: newExpiry,
-          stocks: {}
-        });
-
-        setTimeLeft(calculateTimeLeft(newExpiry));
+        setDealsState(freshState);
+        setTimeLeft(calculateTimeLeft(freshState.expiry));
 
         if (onCycleResetRef.current) {
-          onCycleResetRef.current(nextCycle);
+          onCycleResetRef.current(freshState.cycle);
         }
       } else {
         setTimeLeft(calculateTimeLeft(currentExpiry));
