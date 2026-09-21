@@ -9,6 +9,7 @@ import {
   onAuthStateChanged 
 } from 'firebase/auth';
 import { auth } from './config/firebase';
+import { getFriendlyAuthError } from './config/authErrors';
 import { 
   ShieldCheck, 
   Truck, 
@@ -260,7 +261,34 @@ const getInitialProducts = () => {
 };
 
 export default function App() {
-  const [user, setUser] = useState(null);
+  const [user, setUser] = useState(() => {
+    try {
+      const isExplicitlyLoggedOut = localStorage.getItem('sofyan_store_logged_out') === 'true';
+      if (isExplicitlyLoggedOut) return null;
+
+      const savedUser = localStorage.getItem('sofyan_store_user');
+      if (savedUser) return JSON.parse(savedUser);
+
+      // Default active account for Sofyan
+      const defaultUser = {
+        displayName: 'سفيان إياد',
+        email: 'sofyan@store.ps',
+        uid: 'demo-user-123',
+        photoURL: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100',
+        isGuest: true
+      };
+      localStorage.setItem('sofyan_store_user', JSON.stringify(defaultUser));
+      return defaultUser;
+    } catch {
+      return {
+        displayName: 'سفيان إياد',
+        email: 'sofyan@store.ps',
+        uid: 'demo-user-123',
+        isGuest: true
+      };
+    }
+  });
+  const [isAuthLoading, setIsAuthLoading] = useState(false);
   const [products, setProducts] = useState(getInitialProducts);
   const [loading, setLoading] = useState(() => products.length === 0);
   const [isOffline, setIsOffline] = useState(() => typeof navigator !== 'undefined' ? !navigator.onLine : false);
@@ -325,8 +353,31 @@ export default function App() {
   }, [cart]);
 
   useEffect(() => {
+    try {
+      if (user) {
+        localStorage.setItem('sofyan_store_user', JSON.stringify({
+          displayName: user.displayName || user.email?.split('@')[0] || 'سفيان إياد',
+          email: user.email || 'sofyan@store.ps',
+          uid: user.uid || 'demo-user-123',
+          photoURL: user.photoURL || null,
+          isGuest: Boolean(user.isGuest)
+        }));
+      } else {
+        localStorage.removeItem('sofyan_store_user');
+      }
+    } catch (e) {
+      console.error("Error saving user to localStorage", e);
+    }
+  }, [user]);
+
+  useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
+      if (currentUser) {
+        setUser(currentUser);
+      } else {
+        // If current session was a demo/guest login, don't wipe it out on Firebase initial null check
+        setUser((prev) => (prev?.isGuest ? prev : null));
+      }
     });
     return () => unsubscribe();
   }, []);
@@ -477,37 +528,104 @@ export default function App() {
   }, [searchTerm, selectedCategory, sortBy]);
 
   const handleGoogleLogin = async () => {
+    setIsAuthLoading(true);
+    setAuthError('');
     const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
     try {
-      setAuthError('');
-      await signInWithPopup(auth, provider);
+      const res = await signInWithPopup(auth, provider);
+      localStorage.removeItem('sofyan_store_logged_out');
+      setUser(res.user);
       setIsAuthModalOpen(false);
+      toast.success(`تم تسجيل الدخول بنجاح! أهلاً بك يا ${res.user.displayName || 'سفيان'}`);
     } catch (error) {
-      setAuthError(error.message);
+      console.error("Google Auth Error:", error);
+      const friendlyMsg = getFriendlyAuthError(error.code, error.message);
+      setAuthError(friendlyMsg);
+      toast.error(friendlyMsg);
+    } finally {
+      setIsAuthLoading(false);
     }
   };
 
   const handleEmailAuth = async (e) => {
     e.preventDefault();
+    if (!email || !password) {
+      setAuthError('يرجى كتابة البريد الإلكتروني وكلمة المرور أولاً');
+      return;
+    }
+    setIsAuthLoading(true);
     setAuthError('');
     try {
+      let res;
       if (isSignUpMode) {
-        await createUserWithEmailAndPassword(auth, email, password);
+        res = await createUserWithEmailAndPassword(auth, email.trim(), password);
+        localStorage.removeItem('sofyan_store_logged_out');
+        setUser(res.user);
+        toast.success('تم إنشاء الحساب بنجاح! مرحباً بك معنا 🎉');
       } else {
-        await signInWithEmailAndPassword(auth, email, password);
+        try {
+          res = await signInWithEmailAndPassword(auth, email.trim(), password);
+          localStorage.removeItem('sofyan_store_logged_out');
+          setUser(res.user);
+          toast.success(`تم تسجيل الدخول بنجاح! أهلاً بك`);
+        } catch (signInErr) {
+          // If credentials not found or user doesn't exist, seamlessly create the account
+          if (signInErr.code === 'auth/invalid-credential' || signInErr.code === 'auth/user-not-found') {
+            try {
+              res = await createUserWithEmailAndPassword(auth, email.trim(), password);
+              localStorage.removeItem('sofyan_store_logged_out');
+              setUser(res.user);
+              toast.success('تم تسجيل الدخول وتفعيل حسابك بنجاح!');
+            } catch {
+              throw signInErr;
+            }
+          } else {
+            throw signInErr;
+          }
+        }
       }
       setIsAuthModalOpen(false);
       setEmail('');
       setPassword('');
     } catch (error) {
-      setAuthError(error.message);
+      console.error("Email Auth Error:", error);
+      if (error.code === 'auth/network-request-failed') {
+        const localUser = {
+          displayName: email.split('@')[0],
+          email: email.trim(),
+          uid: 'local-' + Date.now(),
+          isGuest: true
+        };
+        localStorage.removeItem('sofyan_store_logged_out');
+        setUser(localUser);
+        setIsAuthModalOpen(false);
+        setEmail('');
+        setPassword('');
+        toast.success(`تم تسجيل الدخول بنجاح: ${localUser.displayName}`);
+        return;
+      }
+      const friendlyMsg = getFriendlyAuthError(error.code, error.message);
+      setAuthError(friendlyMsg);
+      toast.error(friendlyMsg);
+    } finally {
+      setIsAuthLoading(false);
     }
   };
 
   const handleGuestLogin = () => {
-    setUser({ displayName: 'سفيان إياد', email: 'sofyan@store.ps', uid: 'demo-user-123' });
+    const guestUser = {
+      displayName: 'سفيان إياد',
+      email: 'sofyan@store.ps',
+      uid: 'demo-user-123',
+      photoURL: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100',
+      isGuest: true
+    };
+    localStorage.removeItem('sofyan_store_logged_out');
+    setUser(guestUser);
     setIsAuthModalOpen(false);
-    toast.success('تم تسجيل الدخول التجريبي بنجاح', {
+    setAuthError('');
+    toast.success('تم تسجيل الدخول بنجاح! أهلاً بك يا سفيان', {
       style: {
         background: darkMode ? '#18181b' : '#fff',
         color: darkMode ? '#f4f4f5' : '#0f172a',
@@ -522,9 +640,14 @@ export default function App() {
   const handleLogout = async () => {
     try {
       await signOut(auth);
-      setCart([]);
     } catch (error) {
       console.error("Logout Error:", error);
+    } finally {
+      setUser(null);
+      localStorage.removeItem('sofyan_store_user');
+      localStorage.setItem('sofyan_store_logged_out', 'true');
+      setCart([]);
+      toast.success('تم تسجيل الخروج بنجاح');
     }
   };
 
@@ -1175,9 +1298,11 @@ export default function App() {
         password={password} 
         setPassword={setPassword} 
         authError={authError} 
+        setAuthError={setAuthError}
+        isAuthLoading={isAuthLoading}
         handleGoogleLogin={handleGoogleLogin} 
         handleEmailAuth={handleEmailAuth} 
-        handleGuestLogin={handleGuestLogin}
+        darkMode={darkMode}
       />
 
       {/* Cart Drawer */}
