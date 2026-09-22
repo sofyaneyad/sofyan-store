@@ -153,19 +153,9 @@ const formatRawProducts = (rawList, savedStoreStocks = {}, savedDealStocks = {})
     if (DEFAULT_OUT_OF_STOCK_IDS.includes(idStr)) {
       currentStock = 0;
     } else if (isDealProduct) {
-      if (savedDealStocks[idStr] !== undefined) {
-        currentStock = savedDealStocks[idStr];
-      } else if (savedStoreStocks[idStr] !== undefined) {
-        currentStock = savedStoreStocks[idStr];
-      } else {
-        currentStock = DEFAULT_DEAL_STARTING_STOCKS[dealIdx % DEFAULT_DEAL_STARTING_STOCKS.length];
-      }
+      currentStock = DEFAULT_DEAL_STARTING_STOCKS[dealIdx % DEFAULT_DEAL_STARTING_STOCKS.length];
     } else {
-      if (savedStoreStocks[idStr] !== undefined) {
-        currentStock = savedStoreStocks[idStr];
-      } else {
-        currentStock = originalStock;
-      }
+      currentStock = originalStock;
     }
 
     const productPrice = typeof item.price === 'number' ? item.price : 10;
@@ -230,9 +220,7 @@ const getInitialProducts = () => {
           if (dealIdx !== -1) {
             const currentStock = isExplicitSoldOut 
               ? 0 
-              : (savedDealStocks[idStr] !== undefined 
-                ? savedDealStocks[idStr] 
-                : (typeof p.stock === 'number' ? p.stock : DEFAULT_DEAL_STARTING_STOCKS[dealIdx % DEFAULT_DEAL_STARTING_STOCKS.length]));
+              : DEFAULT_DEAL_STARTING_STOCKS[dealIdx % DEFAULT_DEAL_STARTING_STOCKS.length];
             return { 
               ...p, 
               stock: currentStock, 
@@ -242,9 +230,7 @@ const getInitialProducts = () => {
           }
           const currentStock = isExplicitSoldOut 
             ? 0 
-            : (savedStoreStocks[idStr] !== undefined 
-                ? savedStoreStocks[idStr] 
-                : (typeof p.stock === 'number' ? p.stock : (typeof p.originalStock === 'number' ? p.originalStock : 25)));
+            : (typeof p.originalStock === 'number' ? p.originalStock : (typeof p.stock === 'number' ? p.stock : 25));
           return { 
             ...p, 
             stock: currentStock,
@@ -348,6 +334,9 @@ export default function App() {
     try {
       localStorage.removeItem('sofyan_store_user');
       localStorage.removeItem('sofyan_store_logged_out');
+      localStorage.removeItem(STORE_STOCK_STORAGE_KEY);
+      localStorage.removeItem(STOCK_STORAGE_KEY);
+      localStorage.removeItem(PRODUCTS_CACHE_KEY);
     } catch {}
 
     if (!hasActiveSession) {
@@ -635,10 +624,18 @@ export default function App() {
       return;
     }
 
+    const maxStock = typeof product.stock === 'number' ? product.stock : 25;
+    let limitReached = false;
+
     setCart(prevCart => {
       const existingItem = prevCart.find(item => item.id === product.id);
+      const currentQty = existingItem ? existingItem.quantity : 0;
+      if (currentQty >= maxStock) {
+        limitReached = true;
+        return prevCart;
+      }
+      const newQty = Math.min(maxStock, currentQty + safeQty);
       if (existingItem) {
-        const newQty = Math.min(MAX_PRODUCT_LIMIT, existingItem.quantity + safeQty);
         return prevCart.map(item => 
           item.id === product.id ? { ...item, quantity: newQty } : item
         );
@@ -646,32 +643,10 @@ export default function App() {
       return [...prevCart, { ...product, quantity: safeQty }];
     });
 
-    // Decrement product stock in state and persist
-    setProducts(prevProducts => {
-      let nextStockCalculated = 0;
-      const updated = prevProducts.map(p => {
-        if (p.id === product.id) {
-          const current = p.stock !== undefined ? p.stock : 25;
-          nextStockCalculated = Math.max(0, current - safeQty);
-          return { ...p, stock: nextStockCalculated };
-        }
-        return p;
-      });
-      try {
-        const storeSaved = JSON.parse(localStorage.getItem(STORE_STOCK_STORAGE_KEY) || '{}');
-        storeSaved[product.id] = nextStockCalculated;
-        localStorage.setItem(STORE_STOCK_STORAGE_KEY, JSON.stringify(storeSaved));
-
-        const dealSaved = JSON.parse(localStorage.getItem(STOCK_STORAGE_KEY) || '{}');
-        dealSaved[product.id] = nextStockCalculated;
-        localStorage.setItem(STOCK_STORAGE_KEY, JSON.stringify(dealSaved));
-
-        localStorage.setItem(PRODUCTS_CACHE_KEY, JSON.stringify(updated));
-      } catch {
-        // ignore storage error
-      }
-      return updated;
-    });
+    if (limitReached) {
+      toast.error(`عذراً، وصلت للحد الأقصى المتاح من هذا المنتج (${maxStock} قطع)`);
+      return;
+    }
 
     toast.success(`تمت إضافة ${safeQty > 1 ? `${safeQty} قطع من ` : ''}${product.name} إلى السلة`, {
       style: {
