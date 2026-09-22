@@ -87,10 +87,7 @@ export default function FlashDealsSection({
       const initialStock = DEFAULT_INITIAL_STOCKS[index % DEFAULT_INITIAL_STOCKS.length];
       const defaultStarting = DEFAULT_DEAL_STARTING_STOCKS[index % DEFAULT_DEAL_STARTING_STOCKS.length];
       
-      // Index 0 (Calvin Klein) has remaining stock (4). Indices 1, 2, 3 (Bed, Swing, Stove) are completely sold out!
-      const currentStock = (index === 0) 
-        ? (prod.stock !== undefined ? prod.stock : defaultStarting) 
-        : 0;
+      const currentStock = prod.stock !== undefined ? prod.stock : defaultStarting;
 
       return {
         ...prod,

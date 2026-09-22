@@ -7,7 +7,7 @@ export const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000; // Exactly 72 hours (3 day
 // Minimum price required for a product to be eligible for discounts or flash deals
 export const MIN_DISCOUNT_PRICE_THRESHOLD = 40;
 export const DEFAULT_INITIAL_STOCKS = [5, 4, 6, 5];
-export const DEFAULT_DEAL_STARTING_STOCKS = [4, 0, 0, 0];
+export const DEFAULT_DEAL_STARTING_STOCKS = [4, 3, 5, 4];
 // Realistic, commercially balanced deal discounts (8% - 12%) so they stack reasonably with store coupons
 export const DEAL_DISCOUNTS = [10, 8, 12, 9];
 
