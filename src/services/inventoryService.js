@@ -53,3 +53,27 @@ export const deductStockInCloud = async (purchasedItems) => {
     console.warn('Could not sync stock to Firestore (Firestore may need to be enabled in Firebase Console):', err.message);
   }
 };
+
+/**
+ * Restores stock in Cloud Firestore if item is removed from cart.
+ */
+export const restoreStockInCloud = async (items) => {
+  if (!Array.isArray(items) || items.length === 0) return;
+  try {
+    const docRef = doc(db, 'store_inventory', INVENTORY_DOC_ID);
+    const snap = await getDoc(docRef);
+    const currentData = snap.exists() ? snap.data() : {};
+    
+    const updates = { ...currentData };
+    items.forEach(item => {
+      const id = String(item.id);
+      if (typeof updates[id] === 'number') {
+        updates[id] = updates[id] + (item.quantity || 1);
+      }
+    });
+
+    await setDoc(docRef, updates, { merge: true });
+  } catch (err) {
+    console.warn('Could not restore stock in Firestore:', err.message);
+  }
+};

@@ -10,7 +10,7 @@ import {
 } from 'firebase/auth';
 import { auth } from './config/firebase';
 import { getFriendlyAuthError } from './config/authErrors';
-import { subscribeToInventory, deductStockInCloud } from './services/inventoryService';
+import { subscribeToInventory, deductStockInCloud, restoreStockInCloud } from './services/inventoryService';
 import { 
   ShieldCheck, 
   Truck, 
@@ -627,9 +627,10 @@ export default function App() {
 
   const handleAddToCart = (product, quantity = 1) => {
     const safeQty = Math.max(1, Math.min(MAX_PRODUCT_LIMIT, Number(quantity) || 1));
+    const currentStock = typeof product.stock === 'number' ? product.stock : 25;
 
     // Check if product is out of stock
-    if (product.stock !== undefined && product.stock <= 0) {
+    if (currentStock <= 0) {
       toast.error('عذراً، هذا المنتج نفد من المخزون بالكامل!', {
         style: {
           background: darkMode ? '#18181b' : '#fff',
@@ -643,29 +644,35 @@ export default function App() {
       return;
     }
 
-    const maxStock = typeof product.stock === 'number' ? product.stock : 25;
-    let limitReached = false;
+    if (safeQty > currentStock) {
+      toast.error(`عذراً، الكمية المتبقية غير كافية (المتبقي: ${currentStock} قطع فقط)`);
+      return;
+    }
 
+    // 1. Immediately decrement product stock in store
+    setProducts(prevProducts => {
+      return prevProducts.map(p => {
+        if (String(p.id) === String(product.id)) {
+          const s = typeof p.stock === 'number' ? p.stock : 25;
+          return { ...p, stock: Math.max(0, s - safeQty) };
+        }
+        return p;
+      });
+    });
+
+    // 2. Add to cart
     setCart(prevCart => {
-      const existingItem = prevCart.find(item => item.id === product.id);
-      const currentQty = existingItem ? existingItem.quantity : 0;
-      if (currentQty >= maxStock) {
-        limitReached = true;
-        return prevCart;
-      }
-      const newQty = Math.min(maxStock, currentQty + safeQty);
+      const existingItem = prevCart.find(item => String(item.id) === String(product.id));
       if (existingItem) {
         return prevCart.map(item => 
-          item.id === product.id ? { ...item, quantity: newQty } : item
+          String(item.id) === String(product.id) ? { ...item, quantity: item.quantity + safeQty } : item
         );
       }
       return [...prevCart, { ...product, quantity: safeQty }];
     });
 
-    if (limitReached) {
-      toast.error(`عذراً، وصلت للحد الأقصى المتاح من هذا المنتج (${maxStock} قطع)`);
-      return;
-    }
+    // 3. Broadcast to Cloud Firestore
+    deductStockInCloud([{ id: product.id, quantity: safeQty, stock: currentStock }]);
 
     toast.success(`تمت إضافة ${safeQty > 1 ? `${safeQty} قطع من ` : ''}${product.name} إلى السلة`, {
       style: {
@@ -684,10 +691,35 @@ export default function App() {
   };
 
   const updateCartQuantity = (productId, delta) => {
+    const product = products.find(p => String(p.id) === String(productId));
+    if (delta > 0 && product && typeof product.stock === 'number' && product.stock <= 0) {
+      toast.error('عذراً، نفد المخزون المتاح من هذا المنتج بالكامل!');
+      return;
+    }
+
     setCart(prevCart => {
       return prevCart.map(item => {
-        if (item.id === productId) {
-          const newQty = Math.max(1, Math.min(MAX_PRODUCT_LIMIT, item.quantity + delta));
+        if (String(item.id) === String(productId)) {
+          const newQty = item.quantity + delta;
+          if (newQty < 1) return item;
+
+          // Adjust store stock accordingly
+          setProducts(prevProducts => {
+            return prevProducts.map(p => {
+              if (String(p.id) === String(productId)) {
+                const s = typeof p.stock === 'number' ? p.stock : 25;
+                return { ...p, stock: Math.max(0, s - delta) };
+              }
+              return p;
+            });
+          });
+
+          if (delta > 0) {
+            deductStockInCloud([{ id: productId, quantity: delta }]);
+          } else {
+            restoreStockInCloud([{ id: productId, quantity: Math.abs(delta) }]);
+          }
+
           return { ...item, quantity: newQty };
         }
         return item;
@@ -699,7 +731,24 @@ export default function App() {
     const safeQty = Math.max(1, Math.min(MAX_PRODUCT_LIMIT, Number(exactQty) || 1));
     setCart(prevCart => {
       return prevCart.map(item => {
-        if (item.id === productId) {
+        if (String(item.id) === String(productId)) {
+          const diff = safeQty - item.quantity;
+          if (diff !== 0) {
+            setProducts(prevProducts => {
+              return prevProducts.map(p => {
+                if (String(p.id) === String(productId)) {
+                  const s = typeof p.stock === 'number' ? p.stock : 25;
+                  return { ...p, stock: Math.max(0, s - diff) };
+                }
+                return p;
+              });
+            });
+            if (diff > 0) {
+              deductStockInCloud([{ id: productId, quantity: diff }]);
+            } else {
+              restoreStockInCloud([{ id: productId, quantity: Math.abs(diff) }]);
+            }
+          }
           return { ...item, quantity: safeQty };
         }
         return item;
@@ -709,7 +758,21 @@ export default function App() {
 
   const removeFromCart = (productId) => {
     setCart(prev => {
-      const nextCart = prev.filter(item => item.id !== productId);
+      const itemToRemove = prev.find(item => String(item.id) === String(productId));
+      if (itemToRemove) {
+        // Restore stock to store
+        setProducts(prevProducts => {
+          return prevProducts.map(p => {
+            if (String(p.id) === String(productId)) {
+              const s = typeof p.stock === 'number' ? p.stock : 25;
+              return { ...p, stock: s + itemToRemove.quantity };
+            }
+            return p;
+          });
+        });
+        restoreStockInCloud([{ id: productId, quantity: itemToRemove.quantity }]);
+      }
+      const nextCart = prev.filter(item => String(item.id) !== String(productId));
       if (nextCart.length === 0) {
         setIsCartOpen(false);
       }
@@ -719,6 +782,18 @@ export default function App() {
 
   const clearCart = () => {
     if (cart.length === 0) return;
+    // Restore all items back to store stock
+    setProducts(prevProducts => {
+      return prevProducts.map(p => {
+        const cartItem = cart.find(item => String(item.id) === String(p.id));
+        if (cartItem) {
+          const s = typeof p.stock === 'number' ? p.stock : 25;
+          return { ...p, stock: s + cartItem.quantity };
+        }
+        return p;
+      });
+    });
+    restoreStockInCloud(cart);
     setAppliedCoupon(null);
     setCart([]);
     setIsCartOpen(false);
