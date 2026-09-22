@@ -726,10 +726,17 @@ export default function App() {
           // Adjust store stock accordingly
           let targetNextStock = 0;
           setProducts(prevProducts => {
+            const dealsState = getStoredFlashDealsState();
+            const dealProductIds = getFlashDealProductIds(prevProducts, dealsState.cycle);
             return prevProducts.map(p => {
               if (String(p.id) === String(productId)) {
+                const idStr = String(p.id);
+                const dealIdx = dealProductIds.indexOf(idStr);
+                const maxStock = dealIdx !== -1 
+                  ? DEFAULT_DEAL_STARTING_STOCKS[dealIdx % DEFAULT_DEAL_STARTING_STOCKS.length]
+                  : (typeof p.originalStock === 'number' ? p.originalStock : 25);
                 const s = typeof p.stock === 'number' ? p.stock : 25;
-                const nextStock = Math.max(0, s - delta);
+                const nextStock = Math.min(maxStock, Math.max(0, s - delta));
                 targetNextStock = nextStock;
                 saveLiveStock(p.id, nextStock);
                 return { ...p, stock: nextStock };
@@ -756,10 +763,17 @@ export default function App() {
           if (diff !== 0) {
             let targetNextStock = 0;
             setProducts(prevProducts => {
+              const dealsState = getStoredFlashDealsState();
+              const dealProductIds = getFlashDealProductIds(prevProducts, dealsState.cycle);
               return prevProducts.map(p => {
                 if (String(p.id) === String(productId)) {
+                  const idStr = String(p.id);
+                  const dealIdx = dealProductIds.indexOf(idStr);
+                  const maxStock = dealIdx !== -1 
+                    ? DEFAULT_DEAL_STARTING_STOCKS[dealIdx % DEFAULT_DEAL_STARTING_STOCKS.length]
+                    : (typeof p.originalStock === 'number' ? p.originalStock : 25);
                   const s = typeof p.stock === 'number' ? p.stock : 25;
-                  const nextStock = Math.max(0, s - diff);
+                  const nextStock = Math.min(maxStock, Math.max(0, s - diff));
                   targetNextStock = nextStock;
                   saveLiveStock(p.id, nextStock);
                   return { ...p, stock: nextStock };
@@ -820,7 +834,7 @@ export default function App() {
     if (cart.length === 0) return;
     const currentCart = [...cart];
     const restoredMap = {};
-    // Restore all items back to their original store stock
+    // Restore exact items from cart back to store stock: exactly stock + cartItem.quantity
     setProducts(prevProducts => {
       const dealsState = getStoredFlashDealsState();
       const dealProductIds = getFlashDealProductIds(prevProducts, dealsState.cycle);
@@ -830,12 +844,11 @@ export default function App() {
         if (cartItem) {
           const idStr = String(p.id);
           const dealIdx = dealProductIds.indexOf(idStr);
-          let restoredStock;
-          if (dealIdx !== -1) {
-            restoredStock = DEFAULT_DEAL_STARTING_STOCKS[dealIdx % DEFAULT_DEAL_STARTING_STOCKS.length];
-          } else {
-            restoredStock = typeof p.originalStock === 'number' ? p.originalStock : 25;
-          }
+          const maxStock = dealIdx !== -1
+            ? DEFAULT_DEAL_STARTING_STOCKS[dealIdx % DEFAULT_DEAL_STARTING_STOCKS.length]
+            : (typeof p.originalStock === 'number' ? p.originalStock : 25);
+          const s = typeof p.stock === 'number' ? p.stock : 0;
+          const restoredStock = Math.min(maxStock, s + (cartItem.quantity || 1));
           restoredMap[idStr] = restoredStock;
           saveLiveStock(p.id, restoredStock);
           return { ...p, stock: restoredStock };
@@ -847,7 +860,7 @@ export default function App() {
     setAppliedCoupon(null);
     setCart([]);
     setIsCartOpen(false);
-    toast.success('تم تفريغ السلة وإرجاع جميع المنتجات للمخزون بنجاح ✨', {
+    toast.success('تم تفريغ السلة وإرجاع جميع القطع للمخزون بدقة تامة ✨', {
       style: {
         background: darkMode ? '#121217' : '#fff',
         color: darkMode ? '#fff' : '#0f172a',
