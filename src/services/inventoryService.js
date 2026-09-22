@@ -1,23 +1,27 @@
-import { ref, onValue, set, get } from 'firebase/database';
+import { ref, onValue, update } from 'firebase/database';
 import { rtdb } from '../config/firebase';
 
 const INVENTORY_REF_PATH = 'store_live_inventory';
 
 /**
  * Subscribes to real-time inventory stock changes from Firebase Realtime Database.
- * Automatically synchronizes stock across Localhost, Vercel, and all devices in under 100ms.
+ * Synchronizes stock across Localhost, Vercel, and all devices in real time via WebSockets.
  */
 export const subscribeToInventory = (onUpdate) => {
   try {
     const stockRef = ref(rtdb, INVENTORY_REF_PATH);
-    const unsubscribe = onValue(stockRef, (snapshot) => {
-      const data = snapshot.val();
-      if (data && typeof onUpdate === 'function') {
-        onUpdate(data);
+    const unsubscribe = onValue(
+      stockRef,
+      (snapshot) => {
+        const data = snapshot.val();
+        if (data && typeof onUpdate === 'function') {
+          onUpdate(data);
+        }
+      },
+      (error) => {
+        console.warn('Real-time inventory listener error:', error.message);
       }
-    }, (error) => {
-      console.warn('Real-time inventory listener error:', error.message);
-    });
+    );
     return unsubscribe;
   } catch (err) {
     console.warn('Inventory subscribe error:', err);
@@ -26,52 +30,63 @@ export const subscribeToInventory = (onUpdate) => {
 };
 
 /**
- * Deducts stock in Firebase Realtime Database immediately.
- * Broadcasts the updated stock to Localhost, Vercel, and all users in real time.
+ * Atomically updates a single product's exact stock in Firebase Realtime Database.
+ * Instantly broadcasts to Localhost, Vercel, and all connected browsers.
  */
-export const deductStockInCloud = async (purchasedItems) => {
-  if (!Array.isArray(purchasedItems) || purchasedItems.length === 0) return;
+export const syncStockToCloud = async (productId, exactStock) => {
+  if (productId === undefined || productId === null) return;
   try {
+    const safeStock = Math.max(0, Number(exactStock) || 0);
     const stockRef = ref(rtdb, INVENTORY_REF_PATH);
-    const snap = await get(stockRef);
-    const currentData = snap.exists() ? (snap.val() || {}) : {};
-    
-    const updates = { ...currentData };
-    purchasedItems.forEach(item => {
-      const id = String(item.id);
-      const currentQty = typeof updates[id] === 'number' 
-        ? updates[id] 
-        : (typeof item.stock === 'number' ? item.stock : 25);
-      updates[id] = Math.max(0, currentQty - (item.quantity || 1));
+    await update(stockRef, {
+      [String(productId)]: safeStock
     });
-
-    await set(stockRef, updates);
   } catch (err) {
-    console.warn('Could not sync stock to Realtime Database:', err.message);
+    console.warn('Failed to sync stock to Realtime Database:', err.message);
   }
 };
 
 /**
- * Restores stock in Firebase Realtime Database if item is removed or cart is emptied.
- * Immediately pushes the restored count to Localhost and Vercel simultaneously.
+ * Atomically updates multiple products' exact stocks in Firebase Realtime Database in a single operation.
  */
+export const syncMultipleStocksToCloud = async (stocksMap) => {
+  if (!stocksMap || typeof stocksMap !== 'object') return;
+  try {
+    const updates = {};
+    Object.entries(stocksMap).forEach(([id, stock]) => {
+      updates[String(id)] = Math.max(0, Number(stock) || 0);
+    });
+    if (Object.keys(updates).length === 0) return;
+    const stockRef = ref(rtdb, INVENTORY_REF_PATH);
+    await update(stockRef, updates);
+  } catch (err) {
+    console.warn('Failed to sync multiple stocks to Realtime Database:', err.message);
+  }
+};
+
+// Legacy compatibility wrappers
+export const deductStockInCloud = async (items) => {
+  if (!Array.isArray(items) || items.length === 0) return;
+  const updates = {};
+  items.forEach(it => {
+    if (typeof it.nextStock === 'number') {
+      updates[String(it.id)] = it.nextStock;
+    }
+  });
+  if (Object.keys(updates).length > 0) {
+    await syncMultipleStocksToCloud(updates);
+  }
+};
+
 export const restoreStockInCloud = async (items) => {
   if (!Array.isArray(items) || items.length === 0) return;
-  try {
-    const stockRef = ref(rtdb, INVENTORY_REF_PATH);
-    const snap = await get(stockRef);
-    const currentData = snap.exists() ? (snap.val() || {}) : {};
-    
-    const updates = { ...currentData };
-    items.forEach(item => {
-      const id = String(item.id);
-      if (typeof updates[id] === 'number') {
-        updates[id] = updates[id] + (item.quantity || 1);
-      }
-    });
-
-    await set(stockRef, updates);
-  } catch (err) {
-    console.warn('Could not restore stock in Realtime Database:', err.message);
+  const updates = {};
+  items.forEach(it => {
+    if (typeof it.restoredStock === 'number') {
+      updates[String(it.id)] = it.restoredStock;
+    }
+  });
+  if (Object.keys(updates).length > 0) {
+    await syncMultipleStocksToCloud(updates);
   }
 };

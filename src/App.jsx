@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Toaster, toast } from 'react-hot-toast';
 import { 
   signInWithPopup, 
@@ -10,7 +10,7 @@ import {
 } from 'firebase/auth';
 import { auth } from './config/firebase';
 import { getFriendlyAuthError } from './config/authErrors';
-import { subscribeToInventory, deductStockInCloud, restoreStockInCloud } from './services/inventoryService';
+import { subscribeToInventory, syncStockToCloud, syncMultipleStocksToCloud } from './services/inventoryService';
 import { 
   ShieldCheck, 
   Truck, 
@@ -153,11 +153,12 @@ export const normalizeProductDiscount = (rawDiscount, price = 0) => {
   return Math.min(10, Math.max(4, scaled));
 };
 
-const formatRawProducts = (rawList, savedStoreStocks = {}, savedDealStocks = {}) => {
+const formatRawProducts = (rawList, cloudStocks = {}) => {
   if (!Array.isArray(rawList)) return [];
 
   const dealsState = getStoredFlashDealsState();
   const dealProductIds = getFlashDealProductIds(rawList, dealsState.cycle);
+  const liveStocks = { ...getSavedLiveStocks(), ...(cloudStocks || {}) };
 
   return rawList.map((item) => {
     const idStr = item.id.toString();
@@ -167,7 +168,6 @@ const formatRawProducts = (rawList, savedStoreStocks = {}, savedDealStocks = {})
     const dealIdx = dealProductIds.indexOf(idStr);
     const isDealProduct = dealIdx !== -1;
 
-    const liveStocks = getSavedLiveStocks();
     let currentStock;
     if (DEFAULT_OUT_OF_STOCK_IDS.includes(idStr)) {
       currentStock = 0;
@@ -345,6 +345,7 @@ export default function App() {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [sortBy, setSortBy] = useState('default');
+  const latestCloudStocksRef = useRef({});
 
   useEffect(() => {
     try {
@@ -358,15 +359,10 @@ export default function App() {
     // Check if this is a fresh entry (new tab or newly opened browser)
     const hasActiveSession = sessionStorage.getItem('sofyan_store_session_active');
     try {
-      localStorage.removeItem('sofyan_store_user');
       localStorage.removeItem('sofyan_store_logged_out');
-      localStorage.removeItem(STORE_STOCK_STORAGE_KEY);
-      localStorage.removeItem(STOCK_STORAGE_KEY);
-      localStorage.removeItem(PRODUCTS_CACHE_KEY);
     } catch {}
 
     if (!hasActiveSession) {
-      signOut(auth).catch(() => {});
       setUser(null);
     }
 
@@ -386,6 +382,7 @@ export default function App() {
   useEffect(() => {
     const unsubscribe = subscribeToInventory((cloudStocks) => {
       if (cloudStocks && typeof cloudStocks === 'object') {
+        latestCloudStocksRef.current = cloudStocks;
         try {
           const current = getSavedLiveStocks();
           Object.assign(current, cloudStocks);
@@ -447,18 +444,7 @@ export default function App() {
         throw new Error('Invalid products payload received from API');
       }
 
-      let savedStoreStocks = {};
-      let savedDealStocks = {};
-      try {
-        const storeSaved = localStorage.getItem(STORE_STOCK_STORAGE_KEY);
-        if (storeSaved) savedStoreStocks = JSON.parse(storeSaved);
-        const dealSaved = localStorage.getItem(STOCK_STORAGE_KEY);
-        if (dealSaved) savedDealStocks = JSON.parse(dealSaved);
-      } catch {
-        // ignore
-      }
-
-      const formattedProducts = formatRawProducts(data.products, savedStoreStocks, savedDealStocks);
+      const formattedProducts = formatRawProducts(data.products, latestCloudStocksRef.current);
 
       setProducts(formattedProducts);
       setIsOffline(false);
@@ -680,11 +666,13 @@ export default function App() {
     }
 
     // 1. Immediately decrement product stock in store and persist
+    let finalNextStock = 0;
     setProducts(prevProducts => {
       return prevProducts.map(p => {
         if (String(p.id) === String(product.id)) {
           const s = typeof p.stock === 'number' ? p.stock : 25;
           const nextStock = Math.max(0, s - safeQty);
+          finalNextStock = nextStock;
           saveLiveStock(p.id, nextStock);
           return { ...p, stock: nextStock };
         }
@@ -703,8 +691,8 @@ export default function App() {
       return [...prevCart, { ...product, quantity: safeQty }];
     });
 
-    // 3. Broadcast to Cloud Firestore
-    deductStockInCloud([{ id: product.id, quantity: safeQty, stock: currentStock }]);
+    // 3. Broadcast to Realtime Database
+    syncStockToCloud(product.id, finalNextStock);
 
     toast.success(`تمت إضافة ${safeQty > 1 ? `${safeQty} قطع من ` : ''}${product.name} إلى السلة`, {
       style: {
@@ -736,11 +724,13 @@ export default function App() {
           if (newQty < 1) return item;
 
           // Adjust store stock accordingly
+          let targetNextStock = 0;
           setProducts(prevProducts => {
             return prevProducts.map(p => {
               if (String(p.id) === String(productId)) {
                 const s = typeof p.stock === 'number' ? p.stock : 25;
                 const nextStock = Math.max(0, s - delta);
+                targetNextStock = nextStock;
                 saveLiveStock(p.id, nextStock);
                 return { ...p, stock: nextStock };
               }
@@ -748,11 +738,7 @@ export default function App() {
             });
           });
 
-          if (delta > 0) {
-            deductStockInCloud([{ id: productId, quantity: delta }]);
-          } else {
-            restoreStockInCloud([{ id: productId, quantity: Math.abs(delta) }]);
-          }
+          syncStockToCloud(productId, targetNextStock);
 
           return { ...item, quantity: newQty };
         }
@@ -768,22 +754,20 @@ export default function App() {
         if (String(item.id) === String(productId)) {
           const diff = safeQty - item.quantity;
           if (diff !== 0) {
+            let targetNextStock = 0;
             setProducts(prevProducts => {
               return prevProducts.map(p => {
                 if (String(p.id) === String(productId)) {
                   const s = typeof p.stock === 'number' ? p.stock : 25;
                   const nextStock = Math.max(0, s - diff);
+                  targetNextStock = nextStock;
                   saveLiveStock(p.id, nextStock);
                   return { ...p, stock: nextStock };
                 }
                 return p;
               });
             });
-            if (diff > 0) {
-              deductStockInCloud([{ id: productId, quantity: diff }]);
-            } else {
-              restoreStockInCloud([{ id: productId, quantity: Math.abs(diff) }]);
-            }
+            syncStockToCloud(productId, targetNextStock);
           }
           return { ...item, quantity: safeQty };
         }
@@ -796,6 +780,7 @@ export default function App() {
     const itemToRemove = cart.find(item => String(item.id) === String(productId));
     if (itemToRemove) {
       // Restore stock to store
+      let finalRestored = 0;
       setProducts(prevProducts => {
         const dealsState = getStoredFlashDealsState();
         const dealProductIds = getFlashDealProductIds(prevProducts, dealsState.cycle);
@@ -813,13 +798,14 @@ export default function App() {
               const s = typeof p.stock === 'number' ? p.stock : maxStock;
               restoredStock = Math.min(maxStock, s + itemToRemove.quantity);
             }
+            finalRestored = restoredStock;
             saveLiveStock(p.id, restoredStock);
             return { ...p, stock: restoredStock };
           }
           return p;
         });
       });
-      restoreStockInCloud([{ id: productId, quantity: itemToRemove.quantity }]);
+      syncStockToCloud(productId, finalRestored);
     }
     setCart(prev => {
       const nextCart = prev.filter(item => String(item.id) !== String(productId));
@@ -833,6 +819,7 @@ export default function App() {
   const clearCart = () => {
     if (cart.length === 0) return;
     const currentCart = [...cart];
+    const restoredMap = {};
     // Restore all items back to their original store stock
     setProducts(prevProducts => {
       const dealsState = getStoredFlashDealsState();
@@ -849,13 +836,14 @@ export default function App() {
           } else {
             restoredStock = typeof p.originalStock === 'number' ? p.originalStock : 25;
           }
+          restoredMap[idStr] = restoredStock;
           saveLiveStock(p.id, restoredStock);
           return { ...p, stock: restoredStock };
         }
         return p;
       });
     });
-    restoreStockInCloud(currentCart);
+    syncMultipleStocksToCloud(restoredMap);
     setAppliedCoupon(null);
     setCart([]);
     setIsCartOpen(false);
@@ -891,22 +879,7 @@ export default function App() {
       return;
     }
 
-    // 1. Deduct stock for all purchased items immediately
-    const purchasedItems = [...cart];
-    setProducts(prevProducts => {
-      return prevProducts.map(p => {
-        const cartItem = purchasedItems.find(item => String(item.id) === String(p.id));
-        if (cartItem) {
-          const current = typeof p.stock === 'number' ? p.stock : 25;
-          const nextStock = Math.max(0, current - cartItem.quantity);
-          return { ...p, stock: nextStock };
-        }
-        return p;
-      });
-    });
-
-    // 2. Broadcast and synchronize with Cloud Firestore (for Vercel & all devices)
-    deductStockInCloud(purchasedItems);
+    // Stock was already decremented and synced to Realtime Database upon adding to cart
 
     // If a coupon was applied, mark it as consumed/used so it cannot be used again
     if (appliedCoupon?.code) {

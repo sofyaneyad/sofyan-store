@@ -95,6 +95,7 @@ export default function FlashDealsSection({
         discountPercent,
         initialStock,
         currentStock,
+        stock: currentStock,
         isDealProduct: true
       };
     });
