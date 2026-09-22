@@ -382,10 +382,15 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // Real-time Cloud Firestore stock synchronization between Localhost and Vercel
+  // Real-time Firebase Realtime Database stock synchronization between Localhost and Vercel
   useEffect(() => {
     const unsubscribe = subscribeToInventory((cloudStocks) => {
       if (cloudStocks && typeof cloudStocks === 'object') {
+        try {
+          const current = getSavedLiveStocks();
+          Object.assign(current, cloudStocks);
+          localStorage.setItem(LIVE_STOCK_KEY, JSON.stringify(current));
+        } catch {}
         setProducts(prevProducts => {
           return prevProducts.map(p => {
             const cloudStock = cloudStocks[String(p.id)];
