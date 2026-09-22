@@ -283,25 +283,17 @@ export default function App() {
       if (isExplicitlyLoggedOut) return null;
 
       const savedUser = localStorage.getItem('sofyan_store_user');
-      if (savedUser) return JSON.parse(savedUser);
-
-      // Default active account for Sofyan
-      const defaultUser = {
-        displayName: 'سفيان إياد',
-        email: 'sofyan@store.ps',
-        uid: 'demo-user-123',
-        photoURL: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100',
-        isGuest: true
-      };
-      localStorage.setItem('sofyan_store_user', JSON.stringify(defaultUser));
-      return defaultUser;
+      if (savedUser) {
+        const parsed = JSON.parse(savedUser);
+        if (parsed && parsed.uid && parsed.uid !== 'demo-user-123') {
+          return parsed;
+        } else {
+          localStorage.removeItem('sofyan_store_user');
+        }
+      }
+      return null;
     } catch {
-      return {
-        displayName: 'سفيان إياد',
-        email: 'sofyan@store.ps',
-        uid: 'demo-user-123',
-        isGuest: true
-      };
+      return null;
     }
   });
   const [isAuthLoading, setIsAuthLoading] = useState(false);
@@ -370,11 +362,11 @@ export default function App() {
 
   useEffect(() => {
     try {
-      if (user) {
+      if (user && user.uid !== 'demo-user-123') {
         localStorage.setItem('sofyan_store_user', JSON.stringify({
-          displayName: user.displayName || user.email?.split('@')[0] || 'سفيان إياد',
-          email: user.email || 'sofyan@store.ps',
-          uid: user.uid || 'demo-user-123',
+          displayName: user.displayName || user.email?.split('@')[0] || 'مستخدم',
+          email: user.email || '',
+          uid: user.uid,
           photoURL: user.photoURL || null,
           isGuest: Boolean(user.isGuest)
         }));
@@ -391,8 +383,7 @@ export default function App() {
       if (currentUser) {
         setUser(currentUser);
       } else {
-        // If current session was a demo/guest login, don't wipe it out on Firebase initial null check
-        setUser((prev) => (prev?.isGuest ? prev : null));
+        setUser((prev) => (prev?.isGuest && prev?.uid !== 'demo-user-123' ? prev : null));
       }
     });
     return () => unsubscribe();
