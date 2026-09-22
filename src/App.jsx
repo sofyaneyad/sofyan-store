@@ -277,25 +277,7 @@ const getInitialProducts = () => {
 };
 
 export default function App() {
-  const [user, setUser] = useState(() => {
-    try {
-      const isExplicitlyLoggedOut = localStorage.getItem('sofyan_store_logged_out') === 'true';
-      if (isExplicitlyLoggedOut) return null;
-
-      const savedUser = localStorage.getItem('sofyan_store_user');
-      if (savedUser) {
-        const parsed = JSON.parse(savedUser);
-        if (parsed && parsed.uid && parsed.uid !== 'demo-user-123') {
-          return parsed;
-        } else {
-          localStorage.removeItem('sofyan_store_user');
-        }
-      }
-      return null;
-    } catch {
-      return null;
-    }
-  });
+  const [user, setUser] = useState(null);
   const [isAuthLoading, setIsAuthLoading] = useState(false);
   const [products, setProducts] = useState(getInitialProducts);
   const [loading, setLoading] = useState(() => products.length === 0);
@@ -361,31 +343,27 @@ export default function App() {
   }, [cart]);
 
   useEffect(() => {
+    // Check if this is a fresh entry (new tab or newly opened browser)
+    const hasActiveSession = sessionStorage.getItem('sofyan_store_session_active');
     try {
-      if (user && user.uid !== 'demo-user-123') {
-        localStorage.setItem('sofyan_store_user', JSON.stringify({
-          displayName: user.displayName || user.email?.split('@')[0] || 'مستخدم',
-          email: user.email || '',
-          uid: user.uid,
-          photoURL: user.photoURL || null,
-          isGuest: Boolean(user.isGuest)
-        }));
-      } else {
-        localStorage.removeItem('sofyan_store_user');
-      }
-    } catch (e) {
-      console.error("Error saving user to localStorage", e);
-    }
-  }, [user]);
+      localStorage.removeItem('sofyan_store_user');
+      localStorage.removeItem('sofyan_store_logged_out');
+    } catch {}
 
-  useEffect(() => {
+    if (!hasActiveSession) {
+      signOut(auth).catch(() => {});
+      setUser(null);
+    }
+
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      if (currentUser) {
+      const isSessionActive = sessionStorage.getItem('sofyan_store_session_active');
+      if (currentUser && isSessionActive) {
         setUser(currentUser);
       } else {
-        setUser((prev) => (prev?.isGuest && prev?.uid !== 'demo-user-123' ? prev : null));
+        setUser(null);
       }
     });
+
     return () => unsubscribe();
   }, []);
 
@@ -541,10 +519,10 @@ export default function App() {
     provider.setCustomParameters({ prompt: 'select_account' });
     try {
       const res = await signInWithPopup(auth, provider);
-      localStorage.removeItem('sofyan_store_logged_out');
+      sessionStorage.setItem('sofyan_store_session_active', 'true');
       setUser(res.user);
       setIsAuthModalOpen(false);
-      toast.success(`تم تسجيل الدخول بنجاح! أهلاً بك يا ${res.user.displayName || 'سفيان'}`);
+      toast.success(`تم تسجيل الدخول بنجاح! أهلاً بك يا ${res.user.displayName || ''}`);
     } catch (error) {
       console.error("Google Auth Error:", error);
       const friendlyMsg = getFriendlyAuthError(error.code, error.message);
@@ -567,13 +545,13 @@ export default function App() {
       let res;
       if (isSignUpMode) {
         res = await createUserWithEmailAndPassword(auth, email.trim(), password);
-        localStorage.removeItem('sofyan_store_logged_out');
+        sessionStorage.setItem('sofyan_store_session_active', 'true');
         setUser(res.user);
         toast.success('تم إنشاء الحساب بنجاح! مرحباً بك معنا 🎉');
       } else {
         try {
           res = await signInWithEmailAndPassword(auth, email.trim(), password);
-          localStorage.removeItem('sofyan_store_logged_out');
+          sessionStorage.setItem('sofyan_store_session_active', 'true');
           setUser(res.user);
           toast.success(`تم تسجيل الدخول بنجاح! أهلاً بك`);
         } catch (signInErr) {
@@ -581,7 +559,7 @@ export default function App() {
           if (signInErr.code === 'auth/invalid-credential' || signInErr.code === 'auth/user-not-found') {
             try {
               res = await createUserWithEmailAndPassword(auth, email.trim(), password);
-              localStorage.removeItem('sofyan_store_logged_out');
+              sessionStorage.setItem('sofyan_store_session_active', 'true');
               setUser(res.user);
               toast.success('تم تسجيل الدخول وتفعيل حسابك بنجاح!');
             } catch {
@@ -604,7 +582,7 @@ export default function App() {
           uid: 'local-' + Date.now(),
           isGuest: true
         };
-        localStorage.removeItem('sofyan_store_logged_out');
+        sessionStorage.setItem('sofyan_store_session_active', 'true');
         setUser(localUser);
         setIsAuthModalOpen(false);
         setEmail('');
@@ -620,30 +598,6 @@ export default function App() {
     }
   };
 
-  const handleGuestLogin = () => {
-    const guestUser = {
-      displayName: 'سفيان إياد',
-      email: 'sofyan@store.ps',
-      uid: 'demo-user-123',
-      photoURL: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100',
-      isGuest: true
-    };
-    localStorage.removeItem('sofyan_store_logged_out');
-    setUser(guestUser);
-    setIsAuthModalOpen(false);
-    setAuthError('');
-    toast.success('تم تسجيل الدخول بنجاح! أهلاً بك يا سفيان', {
-      style: {
-        background: darkMode ? '#18181b' : '#fff',
-        color: darkMode ? '#f4f4f5' : '#0f172a',
-        border: darkMode ? '1px solid #27272a' : '1px solid #e2e8f0',
-        fontFamily: 'Cairo, sans-serif',
-        fontSize: '12px',
-        fontWeight: 'bold',
-      }
-    });
-  };
-
   const handleLogout = async () => {
     try {
       await signOut(auth);
@@ -651,8 +605,11 @@ export default function App() {
       console.error("Logout Error:", error);
     } finally {
       setUser(null);
-      localStorage.removeItem('sofyan_store_user');
-      localStorage.setItem('sofyan_store_logged_out', 'true');
+      try {
+        localStorage.removeItem('sofyan_store_user');
+        localStorage.removeItem('sofyan_store_logged_out');
+        sessionStorage.removeItem('sofyan_store_session_active');
+      } catch {}
       setCart([]);
       toast.success('تم تسجيل الخروج بنجاح');
     }
