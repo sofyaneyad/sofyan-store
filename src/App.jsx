@@ -10,6 +10,7 @@ import {
 } from 'firebase/auth';
 import { auth } from './config/firebase';
 import { getFriendlyAuthError } from './config/authErrors';
+import { subscribeToInventory, deductStockInCloud } from './services/inventoryService';
 import { 
   ShieldCheck, 
   Truck, 
@@ -353,6 +354,24 @@ export default function App() {
       }
     });
 
+    return () => unsubscribe();
+  }, []);
+
+  // Real-time Cloud Firestore stock synchronization between Localhost and Vercel
+  useEffect(() => {
+    const unsubscribe = subscribeToInventory((cloudStocks) => {
+      if (cloudStocks && typeof cloudStocks === 'object') {
+        setProducts(prevProducts => {
+          return prevProducts.map(p => {
+            const cloudStock = cloudStocks[String(p.id)];
+            if (typeof cloudStock === 'number') {
+              return { ...p, stock: cloudStock };
+            }
+            return p;
+          });
+        });
+      }
+    });
     return () => unsubscribe();
   }, []);
 
@@ -719,7 +738,7 @@ export default function App() {
     });
   };
 
-  const handleCheckout = (transactionDetails) => {
+  const handleCheckout = async (transactionDetails) => {
     if (!user) {
       toast.error('يرجى تسجيل الدخول أولاً لإتمام عملية الشراء 🔒', {
         style: {
@@ -734,6 +753,23 @@ export default function App() {
       setIsAuthModalOpen(true);
       return;
     }
+
+    // 1. Deduct stock for all purchased items immediately
+    const purchasedItems = [...cart];
+    setProducts(prevProducts => {
+      return prevProducts.map(p => {
+        const cartItem = purchasedItems.find(item => String(item.id) === String(p.id));
+        if (cartItem) {
+          const current = typeof p.stock === 'number' ? p.stock : 25;
+          const nextStock = Math.max(0, current - cartItem.quantity);
+          return { ...p, stock: nextStock };
+        }
+        return p;
+      });
+    });
+
+    // 2. Broadcast and synchronize with Cloud Firestore (for Vercel & all devices)
+    deductStockInCloud(purchasedItems);
 
     // If a coupon was applied, mark it as consumed/used so it cannot be used again
     if (appliedCoupon?.code) {

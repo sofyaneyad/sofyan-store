@@ -87,7 +87,7 @@ export default function FlashDealsSection({
       const initialStock = DEFAULT_INITIAL_STOCKS[index % DEFAULT_INITIAL_STOCKS.length];
       const defaultStarting = DEFAULT_DEAL_STARTING_STOCKS[index % DEFAULT_DEAL_STARTING_STOCKS.length];
       
-      const currentStock = defaultStarting;
+      const currentStock = typeof prod.stock === 'number' ? prod.stock : defaultStarting;
 
       return {
         ...prod,
