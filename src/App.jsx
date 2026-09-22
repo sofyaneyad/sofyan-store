@@ -49,6 +49,23 @@ import {
 import { markCouponAsUsed } from './config/coupons';
 
 export const STORE_STOCK_STORAGE_KEY = 'sofyan_store_stocks_v8';
+export const LIVE_STOCK_KEY = 'sofyan_live_stocks_v9';
+
+export const getSavedLiveStocks = () => {
+  try {
+    return JSON.parse(localStorage.getItem(LIVE_STOCK_KEY) || '{}');
+  } catch {
+    return {};
+  }
+};
+
+export const saveLiveStock = (productId, newStock) => {
+  try {
+    const current = getSavedLiveStocks();
+    current[String(productId)] = newStock;
+    localStorage.setItem(LIVE_STOCK_KEY, JSON.stringify(current));
+  } catch {}
+};
 
 // قائمة بالمنتجات المنتهية الكمية افتراضياً على جميع البيئات (Vercel و Localhost)
 export const DEFAULT_OUT_OF_STOCK_IDS = ['11', '43', '56', '117', '132', '153', '193'];
@@ -150,9 +167,12 @@ const formatRawProducts = (rawList, savedStoreStocks = {}, savedDealStocks = {})
     const dealIdx = dealProductIds.indexOf(idStr);
     const isDealProduct = dealIdx !== -1;
 
+    const liveStocks = getSavedLiveStocks();
     let currentStock;
     if (DEFAULT_OUT_OF_STOCK_IDS.includes(idStr)) {
       currentStock = 0;
+    } else if (typeof liveStocks[idStr] === 'number') {
+      currentStock = liveStocks[idStr];
     } else if (isDealProduct) {
       currentStock = DEFAULT_DEAL_STARTING_STOCKS[dealIdx % DEFAULT_DEAL_STARTING_STOCKS.length];
     } else {
@@ -218,10 +238,13 @@ const getInitialProducts = () => {
           const idStr = String(p.id);
           const isExplicitSoldOut = DEFAULT_OUT_OF_STOCK_IDS.includes(idStr);
           const dealIdx = dealProductIds.indexOf(idStr);
+          const liveStocks = getSavedLiveStocks();
           if (dealIdx !== -1) {
             const currentStock = isExplicitSoldOut 
               ? 0 
-              : DEFAULT_DEAL_STARTING_STOCKS[dealIdx % DEFAULT_DEAL_STARTING_STOCKS.length];
+              : (typeof liveStocks[idStr] === 'number' 
+                  ? liveStocks[idStr] 
+                  : DEFAULT_DEAL_STARTING_STOCKS[dealIdx % DEFAULT_DEAL_STARTING_STOCKS.length]);
             return { 
               ...p, 
               stock: currentStock, 
@@ -231,7 +254,9 @@ const getInitialProducts = () => {
           }
           const currentStock = isExplicitSoldOut 
             ? 0 
-            : (typeof p.originalStock === 'number' ? p.originalStock : (typeof p.stock === 'number' ? p.stock : 25));
+            : (typeof liveStocks[idStr] === 'number'
+                ? liveStocks[idStr]
+                : (typeof p.originalStock === 'number' ? p.originalStock : (typeof p.stock === 'number' ? p.stock : 25)));
           return { 
             ...p, 
             stock: currentStock,
@@ -649,12 +674,14 @@ export default function App() {
       return;
     }
 
-    // 1. Immediately decrement product stock in store
+    // 1. Immediately decrement product stock in store and persist
     setProducts(prevProducts => {
       return prevProducts.map(p => {
         if (String(p.id) === String(product.id)) {
           const s = typeof p.stock === 'number' ? p.stock : 25;
-          return { ...p, stock: Math.max(0, s - safeQty) };
+          const nextStock = Math.max(0, s - safeQty);
+          saveLiveStock(p.id, nextStock);
+          return { ...p, stock: nextStock };
         }
         return p;
       });
@@ -708,7 +735,9 @@ export default function App() {
             return prevProducts.map(p => {
               if (String(p.id) === String(productId)) {
                 const s = typeof p.stock === 'number' ? p.stock : 25;
-                return { ...p, stock: Math.max(0, s - delta) };
+                const nextStock = Math.max(0, s - delta);
+                saveLiveStock(p.id, nextStock);
+                return { ...p, stock: nextStock };
               }
               return p;
             });
@@ -738,7 +767,9 @@ export default function App() {
               return prevProducts.map(p => {
                 if (String(p.id) === String(productId)) {
                   const s = typeof p.stock === 'number' ? p.stock : 25;
-                  return { ...p, stock: Math.max(0, s - diff) };
+                  const nextStock = Math.max(0, s - diff);
+                  saveLiveStock(p.id, nextStock);
+                  return { ...p, stock: nextStock };
                 }
                 return p;
               });
@@ -765,7 +796,9 @@ export default function App() {
           return prevProducts.map(p => {
             if (String(p.id) === String(productId)) {
               const s = typeof p.stock === 'number' ? p.stock : 25;
-              return { ...p, stock: s + itemToRemove.quantity };
+              const nextStock = s + itemToRemove.quantity;
+              saveLiveStock(p.id, nextStock);
+              return { ...p, stock: nextStock };
             }
             return p;
           });
@@ -788,7 +821,9 @@ export default function App() {
         const cartItem = cart.find(item => String(item.id) === String(p.id));
         if (cartItem) {
           const s = typeof p.stock === 'number' ? p.stock : 25;
-          return { ...p, stock: s + cartItem.quantity };
+          const nextStock = s + cartItem.quantity;
+          saveLiveStock(p.id, nextStock);
+          return { ...p, stock: nextStock };
         }
         return p;
       });
@@ -1063,6 +1098,7 @@ export default function App() {
           onCycleReset={(newCycle) => {
             try {
               localStorage.removeItem(STOCK_STORAGE_KEY);
+              localStorage.removeItem(LIVE_STOCK_KEY);
             } catch {
               // ignore
             }
