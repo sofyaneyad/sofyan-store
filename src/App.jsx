@@ -788,23 +788,35 @@ export default function App() {
   };
 
   const removeFromCart = (productId) => {
-    setCart(prev => {
-      const itemToRemove = prev.find(item => String(item.id) === String(productId));
-      if (itemToRemove) {
-        // Restore stock to store
-        setProducts(prevProducts => {
-          return prevProducts.map(p => {
-            if (String(p.id) === String(productId)) {
-              const s = typeof p.stock === 'number' ? p.stock : 25;
-              const nextStock = s + itemToRemove.quantity;
-              saveLiveStock(p.id, nextStock);
-              return { ...p, stock: nextStock };
+    const itemToRemove = cart.find(item => String(item.id) === String(productId));
+    if (itemToRemove) {
+      // Restore stock to store
+      setProducts(prevProducts => {
+        const dealsState = getStoredFlashDealsState();
+        const dealProductIds = getFlashDealProductIds(prevProducts, dealsState.cycle);
+        return prevProducts.map(p => {
+          if (String(p.id) === String(productId)) {
+            const idStr = String(p.id);
+            const dealIdx = dealProductIds.indexOf(idStr);
+            let restoredStock;
+            if (dealIdx !== -1) {
+              const maxStock = DEFAULT_DEAL_STARTING_STOCKS[dealIdx % DEFAULT_DEAL_STARTING_STOCKS.length];
+              const s = typeof p.stock === 'number' ? p.stock : maxStock;
+              restoredStock = Math.min(maxStock, s + itemToRemove.quantity);
+            } else {
+              const maxStock = typeof p.originalStock === 'number' ? p.originalStock : 25;
+              const s = typeof p.stock === 'number' ? p.stock : maxStock;
+              restoredStock = Math.min(maxStock, s + itemToRemove.quantity);
             }
-            return p;
-          });
+            saveLiveStock(p.id, restoredStock);
+            return { ...p, stock: restoredStock };
+          }
+          return p;
         });
-        restoreStockInCloud([{ id: productId, quantity: itemToRemove.quantity }]);
-      }
+      });
+      restoreStockInCloud([{ id: productId, quantity: itemToRemove.quantity }]);
+    }
+    setCart(prev => {
       const nextCart = prev.filter(item => String(item.id) !== String(productId));
       if (nextCart.length === 0) {
         setIsCartOpen(false);
@@ -815,24 +827,34 @@ export default function App() {
 
   const clearCart = () => {
     if (cart.length === 0) return;
-    // Restore all items back to store stock
+    const currentCart = [...cart];
+    // Restore all items back to their original store stock
     setProducts(prevProducts => {
+      const dealsState = getStoredFlashDealsState();
+      const dealProductIds = getFlashDealProductIds(prevProducts, dealsState.cycle);
+
       return prevProducts.map(p => {
-        const cartItem = cart.find(item => String(item.id) === String(p.id));
+        const cartItem = currentCart.find(item => String(item.id) === String(p.id));
         if (cartItem) {
-          const s = typeof p.stock === 'number' ? p.stock : 25;
-          const nextStock = s + cartItem.quantity;
-          saveLiveStock(p.id, nextStock);
-          return { ...p, stock: nextStock };
+          const idStr = String(p.id);
+          const dealIdx = dealProductIds.indexOf(idStr);
+          let restoredStock;
+          if (dealIdx !== -1) {
+            restoredStock = DEFAULT_DEAL_STARTING_STOCKS[dealIdx % DEFAULT_DEAL_STARTING_STOCKS.length];
+          } else {
+            restoredStock = typeof p.originalStock === 'number' ? p.originalStock : 25;
+          }
+          saveLiveStock(p.id, restoredStock);
+          return { ...p, stock: restoredStock };
         }
         return p;
       });
     });
-    restoreStockInCloud(cart);
+    restoreStockInCloud(currentCart);
     setAppliedCoupon(null);
     setCart([]);
     setIsCartOpen(false);
-    toast.success('تم تفريغ سلة التسوق بالكامل', {
+    toast.success('تم تفريغ السلة وإرجاع جميع المنتجات للمخزون بنجاح ✨', {
       style: {
         background: darkMode ? '#121217' : '#fff',
         color: darkMode ? '#fff' : '#0f172a',
@@ -842,7 +864,7 @@ export default function App() {
         fontWeight: 'bold',
       },
       iconTheme: {
-        primary: '#ef4444',
+        primary: '#10b981',
         secondary: '#fff',
       },
     });
