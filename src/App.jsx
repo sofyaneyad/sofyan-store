@@ -49,7 +49,7 @@ import {
 import { markCouponAsUsed } from './config/coupons';
 
 export const STORE_STOCK_STORAGE_KEY = 'sofyan_store_stocks_v8';
-export const LIVE_STOCK_KEY = 'sofyan_live_stocks_v9';
+export const LIVE_STOCK_KEY = 'sofyan_live_stocks_v10';
 
 export const getSavedLiveStocks = () => {
   try {
@@ -72,7 +72,7 @@ export const DEFAULT_OUT_OF_STOCK_IDS = ['11', '43', '56', '117', '132', '153', 
 
 // Clean up old test data to ensure all products return to normal stocks and counter restarts clean
 try {
-  ['sofyan_store_stocks_v5', 'sofyan_flash_deals_stock_v7', 'sofyan_flash_deals_expiry_v7', 'sofyan_flash_deals_cycle_v7', 'sofyan_cached_products_v7', 'sofyan_flash_deals_stock_v6', 'sofyan_flash_deals_expiry_v6', 'sofyan_flash_deals_cycle_v6', 'sofyan_cached_products_v6', 'sofyan_store_stocks_v4', 'sofyan_store_stocks_v3', 'sofyan_flash_deals_stock_v5', 'sofyan_flash_deals_expiry_v5', 'sofyan_flash_deals_cycle_v5', 'sofyan_cached_products_v5', 'sofyan_flash_deals_stock_v4', 'sofyan_flash_deals_expiry_v4', 'sofyan_flash_deals_cycle_v4', 'sofyan_cached_products_v4', 'sofyan_cached_products_v3', 'sofyan_cached_products_v2'].forEach(k => {
+  ['sofyan_live_stocks_v9', 'sofyan_cached_products_v8', 'sofyan_store_stocks_v5', 'sofyan_flash_deals_stock_v7', 'sofyan_flash_deals_expiry_v7', 'sofyan_flash_deals_cycle_v7', 'sofyan_cached_products_v7', 'sofyan_flash_deals_stock_v6', 'sofyan_flash_deals_expiry_v6', 'sofyan_flash_deals_cycle_v6', 'sofyan_cached_products_v6', 'sofyan_store_stocks_v4', 'sofyan_store_stocks_v3', 'sofyan_flash_deals_stock_v5', 'sofyan_flash_deals_expiry_v5', 'sofyan_flash_deals_cycle_v5', 'sofyan_cached_products_v5', 'sofyan_flash_deals_stock_v4', 'sofyan_flash_deals_expiry_v4', 'sofyan_flash_deals_cycle_v4', 'sofyan_cached_products_v4', 'sofyan_cached_products_v3', 'sofyan_cached_products_v2'].forEach(k => {
     localStorage.removeItem(k);
   });
 } catch {
@@ -346,6 +346,16 @@ export default function App() {
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [sortBy, setSortBy] = useState('default');
   const latestCloudStocksRef = useRef({});
+  const productStocksRef = useRef({});
+
+  // Synchronously update productStocksRef whenever products state changes
+  useEffect(() => {
+    products.forEach(p => {
+      if (p && p.id !== undefined && typeof p.stock === 'number') {
+        productStocksRef.current[String(p.id)] = p.stock;
+      }
+    });
+  }, [products]);
 
   useEffect(() => {
     try {
@@ -388,6 +398,11 @@ export default function App() {
           Object.assign(current, cloudStocks);
           localStorage.setItem(LIVE_STOCK_KEY, JSON.stringify(current));
         } catch {}
+        Object.entries(cloudStocks).forEach(([id, st]) => {
+          if (typeof st === 'number') {
+            productStocksRef.current[String(id)] = st;
+          }
+        });
         setProducts(prevProducts => {
           return prevProducts.map(p => {
             const cloudStock = cloudStocks[String(p.id)];
@@ -622,8 +637,63 @@ export default function App() {
     }
   };
 
+  const MAX_PRODUCT_LIMIT = 100;
+
+  const getProductMaxStock = (prodId, productObj = null) => {
+    const idStr = String(prodId);
+    const p = productObj || products.find(x => String(x.id) === idStr);
+    const dealsState = getStoredFlashDealsState();
+    const dealProductIds = getFlashDealProductIds(products, dealsState.cycle);
+    const dealIdx = dealProductIds.indexOf(idStr);
+    if (dealIdx !== -1) {
+      return DEFAULT_DEAL_STARTING_STOCKS[dealIdx % DEFAULT_DEAL_STARTING_STOCKS.length];
+    }
+    return typeof p?.originalStock === 'number' ? p.originalStock : 25;
+  };
+
+  const getCurrentProductStock = (prodId, fallback = 25) => {
+    const idStr = String(prodId);
+    if (typeof productStocksRef.current[idStr] === 'number') {
+      return productStocksRef.current[idStr];
+    }
+    const found = products.find(p => String(p.id) === idStr);
+    if (found && typeof found.stock === 'number') {
+      return found.stock;
+    }
+    return fallback;
+  };
+
+  const restoreAllCartItems = (items) => {
+    if (!Array.isArray(items) || items.length === 0) return;
+    const restoredMap = {};
+
+    items.forEach(cartItem => {
+      const prodId = String(cartItem.id);
+      const product = products.find(p => String(p.id) === prodId);
+      const maxStock = getProductMaxStock(prodId, product);
+      const currentStock = getCurrentProductStock(prodId, typeof product?.stock === 'number' ? product.stock : 0);
+
+      const restoredStock = Math.min(maxStock, currentStock + (cartItem.quantity || 1));
+      restoredMap[prodId] = restoredStock;
+      productStocksRef.current[prodId] = restoredStock;
+      saveLiveStock(prodId, restoredStock);
+    });
+
+    syncMultipleStocksToCloud(restoredMap);
+
+    setProducts(prevProducts => {
+      return prevProducts.map(p => {
+        const restored = restoredMap[String(p.id)];
+        return typeof restored === 'number' ? { ...p, stock: restored } : p;
+      });
+    });
+  };
+
   const handleLogout = async () => {
     try {
+      if (cart && cart.length > 0) {
+        restoreAllCartItems(cart);
+      }
       await signOut(auth);
     } catch (error) {
       console.error("Logout Error:", error);
@@ -635,15 +705,14 @@ export default function App() {
         sessionStorage.removeItem('sofyan_store_session_active');
       } catch {}
       setCart([]);
-      toast.success('تم تسجيل الخروج بنجاح');
+      toast.success('تم تسجيل الخروج بنجاح وإرجاع القطع للمخزون');
     }
   };
 
-  const MAX_PRODUCT_LIMIT = 100;
-
   const handleAddToCart = (product, quantity = 1) => {
+    const prodId = String(product.id);
     const safeQty = Math.max(1, Math.min(MAX_PRODUCT_LIMIT, Number(quantity) || 1));
-    const currentStock = typeof product.stock === 'number' ? product.stock : 25;
+    const currentStock = getCurrentProductStock(prodId, typeof product.stock === 'number' ? product.stock : 25);
 
     // Check if product is out of stock
     if (currentStock <= 0) {
@@ -665,36 +734,36 @@ export default function App() {
       return;
     }
 
-    // 1. Immediately decrement product stock in store and persist
-    let finalNextStock = 0;
+    // 1. Calculate and update exact stock synchronously
+    const nextStock = Math.max(0, currentStock - safeQty);
+    productStocksRef.current[prodId] = nextStock;
+    saveLiveStock(prodId, nextStock);
+
+    // 2. Broadcast accurate stock to Realtime Database IMMEDIATELY
+    syncStockToCloud(prodId, nextStock);
+
+    // 3. Update React product state
     setProducts(prevProducts => {
       return prevProducts.map(p => {
-        if (String(p.id) === String(product.id)) {
-          const s = typeof p.stock === 'number' ? p.stock : 25;
-          const nextStock = Math.max(0, s - safeQty);
-          finalNextStock = nextStock;
-          saveLiveStock(p.id, nextStock);
+        if (String(p.id) === prodId) {
           return { ...p, stock: nextStock };
         }
         return p;
       });
     });
 
-    // 2. Add to cart
+    // 4. Add to cart
     setCart(prevCart => {
-      const existingItem = prevCart.find(item => String(item.id) === String(product.id));
+      const existingItem = prevCart.find(item => String(item.id) === prodId);
       if (existingItem) {
         return prevCart.map(item => 
-          String(item.id) === String(product.id) ? { ...item, quantity: item.quantity + safeQty } : item
+          String(item.id) === prodId ? { ...item, quantity: item.quantity + safeQty } : item
         );
       }
       return [...prevCart, { ...product, quantity: safeQty }];
     });
 
-    // 3. Broadcast to Realtime Database
-    syncStockToCloud(product.id, finalNextStock);
-
-    toast.success(`تمت إضافة ${safeQty > 1 ? `${safeQty} قطع من ` : ''}${product.name} إلى السلة`, {
+    toast.success(`تمت إضافة ${safeQty > 1 ? `${safeQty} قطع من ` : ''}${product.name || product.title} إلى السلة`, {
       style: {
         background: darkMode ? '#18181b' : '#fff',
         color: darkMode ? '#fff' : '#0f172a',
@@ -711,42 +780,39 @@ export default function App() {
   };
 
   const updateCartQuantity = (productId, delta) => {
-    const product = products.find(p => String(p.id) === String(productId));
-    if (delta > 0 && product && typeof product.stock === 'number' && product.stock <= 0) {
+    const prodId = String(productId);
+    const currentItem = cart.find(item => String(item.id) === prodId);
+    if (!currentItem) return;
+
+    const newQty = currentItem.quantity + delta;
+    if (newQty < 1) return;
+
+    const product = products.find(p => String(p.id) === prodId);
+    const maxStock = getProductMaxStock(prodId, product);
+    const currentStock = getCurrentProductStock(prodId, typeof product?.stock === 'number' ? product.stock : 25);
+
+    if (delta > 0 && currentStock <= 0) {
       toast.error('عذراً، نفد المخزون المتاح من هذا المنتج بالكامل!');
       return;
     }
 
+    const nextStock = Math.min(maxStock, Math.max(0, currentStock - delta));
+    productStocksRef.current[prodId] = nextStock;
+    saveLiveStock(prodId, nextStock);
+    syncStockToCloud(prodId, nextStock);
+
+    setProducts(prevProducts => {
+      return prevProducts.map(p => {
+        if (String(p.id) === prodId) {
+          return { ...p, stock: nextStock };
+        }
+        return p;
+      });
+    });
+
     setCart(prevCart => {
       return prevCart.map(item => {
-        if (String(item.id) === String(productId)) {
-          const newQty = item.quantity + delta;
-          if (newQty < 1) return item;
-
-          // Adjust store stock accordingly
-          let targetNextStock = 0;
-          setProducts(prevProducts => {
-            const dealsState = getStoredFlashDealsState();
-            const dealProductIds = getFlashDealProductIds(prevProducts, dealsState.cycle);
-            return prevProducts.map(p => {
-              if (String(p.id) === String(productId)) {
-                const idStr = String(p.id);
-                const dealIdx = dealProductIds.indexOf(idStr);
-                const maxStock = dealIdx !== -1 
-                  ? DEFAULT_DEAL_STARTING_STOCKS[dealIdx % DEFAULT_DEAL_STARTING_STOCKS.length]
-                  : (typeof p.originalStock === 'number' ? p.originalStock : 25);
-                const s = typeof p.stock === 'number' ? p.stock : 25;
-                const nextStock = Math.min(maxStock, Math.max(0, s - delta));
-                targetNextStock = nextStock;
-                saveLiveStock(p.id, nextStock);
-                return { ...p, stock: nextStock };
-              }
-              return p;
-            });
-          });
-
-          syncStockToCloud(productId, targetNextStock);
-
+        if (String(item.id) === prodId) {
           return { ...item, quantity: newQty };
         }
         return item;
@@ -755,34 +821,40 @@ export default function App() {
   };
 
   const setCartItemQuantity = (productId, exactQty) => {
+    const prodId = String(productId);
     const safeQty = Math.max(1, Math.min(MAX_PRODUCT_LIMIT, Number(exactQty) || 1));
+    const currentItem = cart.find(item => String(item.id) === prodId);
+    if (!currentItem) return;
+
+    const diff = safeQty - currentItem.quantity;
+    if (diff !== 0) {
+      const product = products.find(p => String(p.id) === prodId);
+      const maxStock = getProductMaxStock(prodId, product);
+      const currentStock = getCurrentProductStock(prodId, typeof product?.stock === 'number' ? product.stock : 25);
+
+      if (diff > 0 && currentStock < diff) {
+        toast.error(`عذراً، الكمية المتبقية غير كافية (المتبقي: ${currentStock} قطع فقط)`);
+        return;
+      }
+
+      const nextStock = Math.min(maxStock, Math.max(0, currentStock - diff));
+      productStocksRef.current[prodId] = nextStock;
+      saveLiveStock(prodId, nextStock);
+      syncStockToCloud(prodId, nextStock);
+
+      setProducts(prevProducts => {
+        return prevProducts.map(p => {
+          if (String(p.id) === prodId) {
+            return { ...p, stock: nextStock };
+          }
+          return p;
+        });
+      });
+    }
+
     setCart(prevCart => {
       return prevCart.map(item => {
-        if (String(item.id) === String(productId)) {
-          const diff = safeQty - item.quantity;
-          if (diff !== 0) {
-            let targetNextStock = 0;
-            setProducts(prevProducts => {
-              const dealsState = getStoredFlashDealsState();
-              const dealProductIds = getFlashDealProductIds(prevProducts, dealsState.cycle);
-              return prevProducts.map(p => {
-                if (String(p.id) === String(productId)) {
-                  const idStr = String(p.id);
-                  const dealIdx = dealProductIds.indexOf(idStr);
-                  const maxStock = dealIdx !== -1 
-                    ? DEFAULT_DEAL_STARTING_STOCKS[dealIdx % DEFAULT_DEAL_STARTING_STOCKS.length]
-                    : (typeof p.originalStock === 'number' ? p.originalStock : 25);
-                  const s = typeof p.stock === 'number' ? p.stock : 25;
-                  const nextStock = Math.min(maxStock, Math.max(0, s - diff));
-                  targetNextStock = nextStock;
-                  saveLiveStock(p.id, nextStock);
-                  return { ...p, stock: nextStock };
-                }
-                return p;
-              });
-            });
-            syncStockToCloud(productId, targetNextStock);
-          }
+        if (String(item.id) === prodId) {
           return { ...item, quantity: safeQty };
         }
         return item;
@@ -791,38 +863,30 @@ export default function App() {
   };
 
   const removeFromCart = (productId) => {
-    const itemToRemove = cart.find(item => String(item.id) === String(productId));
+    const prodId = String(productId);
+    const itemToRemove = cart.find(item => String(item.id) === prodId);
     if (itemToRemove) {
-      // Restore stock to store
-      let finalRestored = 0;
+      const product = products.find(p => String(p.id) === prodId);
+      const maxStock = getProductMaxStock(prodId, product);
+      const currentStock = getCurrentProductStock(prodId, typeof product?.stock === 'number' ? product.stock : 0);
+
+      const restoredStock = Math.min(maxStock, currentStock + itemToRemove.quantity);
+      productStocksRef.current[prodId] = restoredStock;
+      saveLiveStock(prodId, restoredStock);
+      syncStockToCloud(prodId, restoredStock);
+
       setProducts(prevProducts => {
-        const dealsState = getStoredFlashDealsState();
-        const dealProductIds = getFlashDealProductIds(prevProducts, dealsState.cycle);
         return prevProducts.map(p => {
-          if (String(p.id) === String(productId)) {
-            const idStr = String(p.id);
-            const dealIdx = dealProductIds.indexOf(idStr);
-            let restoredStock;
-            if (dealIdx !== -1) {
-              const maxStock = DEFAULT_DEAL_STARTING_STOCKS[dealIdx % DEFAULT_DEAL_STARTING_STOCKS.length];
-              const s = typeof p.stock === 'number' ? p.stock : maxStock;
-              restoredStock = Math.min(maxStock, s + itemToRemove.quantity);
-            } else {
-              const maxStock = typeof p.originalStock === 'number' ? p.originalStock : 25;
-              const s = typeof p.stock === 'number' ? p.stock : maxStock;
-              restoredStock = Math.min(maxStock, s + itemToRemove.quantity);
-            }
-            finalRestored = restoredStock;
-            saveLiveStock(p.id, restoredStock);
+          if (String(p.id) === prodId) {
             return { ...p, stock: restoredStock };
           }
           return p;
         });
       });
-      syncStockToCloud(productId, finalRestored);
     }
+
     setCart(prev => {
-      const nextCart = prev.filter(item => String(item.id) !== String(productId));
+      const nextCart = prev.filter(item => String(item.id) !== prodId);
       if (nextCart.length === 0) {
         setIsCartOpen(false);
       }
@@ -832,31 +896,7 @@ export default function App() {
 
   const clearCart = () => {
     if (cart.length === 0) return;
-    const currentCart = [...cart];
-    const restoredMap = {};
-    // Restore exact items from cart back to store stock: exactly stock + cartItem.quantity
-    setProducts(prevProducts => {
-      const dealsState = getStoredFlashDealsState();
-      const dealProductIds = getFlashDealProductIds(prevProducts, dealsState.cycle);
-
-      return prevProducts.map(p => {
-        const cartItem = currentCart.find(item => String(item.id) === String(p.id));
-        if (cartItem) {
-          const idStr = String(p.id);
-          const dealIdx = dealProductIds.indexOf(idStr);
-          const maxStock = dealIdx !== -1
-            ? DEFAULT_DEAL_STARTING_STOCKS[dealIdx % DEFAULT_DEAL_STARTING_STOCKS.length]
-            : (typeof p.originalStock === 'number' ? p.originalStock : 25);
-          const s = typeof p.stock === 'number' ? p.stock : 0;
-          const restoredStock = Math.min(maxStock, s + (cartItem.quantity || 1));
-          restoredMap[idStr] = restoredStock;
-          saveLiveStock(p.id, restoredStock);
-          return { ...p, stock: restoredStock };
-        }
-        return p;
-      });
-    });
-    syncMultipleStocksToCloud(restoredMap);
+    restoreAllCartItems(cart);
     setAppliedCoupon(null);
     setCart([]);
     setIsCartOpen(false);
